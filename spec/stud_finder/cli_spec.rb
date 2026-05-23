@@ -1,0 +1,109 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'stud_finder/cli'
+
+RSpec.describe StudFinder::CLI do
+  def run_cli(argv)
+    stdout = StringIO.new
+    stderr = StringIO.new
+    status = described_class.new(argv, stdout: stdout, stderr: stderr).run
+    [status, stdout.string, stderr.string]
+  end
+
+  def make_repo(file_count: 5)
+    Dir.mktmpdir do |dir|
+      system('git', 'init', '-q', dir)
+      file_count.times do |i|
+        path = File.join(dir, "app/models/model_#{i}.rb")
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "class Model#{i}\nend\n")
+      end
+      yield dir
+    end
+  end
+
+  it 'prints help' do
+    stdout = StringIO.new
+    cli = described_class.new(['--help'], stdout: stdout, stderr: StringIO.new)
+
+    expect { cli.run }.to raise_error(SystemExit) do |error|
+      expect(error.status).to eq(0)
+    end
+    expect(stdout.string).to include('Usage: stud-finder [PATH] [OPTIONS]')
+    expect(stdout.string).to include('--weights')
+  end
+
+  it 'prints version' do
+    stdout = StringIO.new
+    cli = described_class.new(['--version'], stdout: stdout, stderr: StringIO.new)
+
+    expect { cli.run }.to raise_error(SystemExit) do |error|
+      expect(error.status).to eq(0)
+    end
+    expect(stdout.string).to include(StudFinder::VERSION)
+  end
+
+  it 'validates weights that do not sum to 1.0' do
+    status, _stdout, stderr = run_cli(['--weights', 'fan_in:0.4,complexity:0.3,churn:0.1,coverage:0.0'])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('actual sum is 0.8000')
+  end
+
+  it 'rejects coverage weight in Phase 1' do
+    status, _stdout, stderr = run_cli(['--weights', 'fan_in:0.35,complexity:0.25,churn:0.25,coverage:0.15'])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('coverage weight must be 0.0 in Phase 1')
+  end
+
+  it 'requires all weight keys' do
+    status, _stdout, stderr = run_cli(['--weights', 'fan_in:0.5,complexity:0.3,churn:0.2'])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('weights must include fan_in, complexity, churn, and coverage')
+  end
+
+  it 'validates threshold ranges' do
+    status, _stdout, stderr = run_cli(['--trunk-threshold', '100'])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('trunk-threshold must be between 1 and 99')
+  end
+
+  it 'requires branch threshold to be less than trunk threshold' do
+    status, _stdout, stderr = run_cli(['--trunk-threshold', '50', '--branch-threshold', '50'])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('branch-threshold must be strictly less than trunk-threshold')
+  end
+
+  it 'returns path errors as exit 1 messages' do
+    status, _stdout, stderr = run_cli([File.join(Dir.tmpdir, "stud-finder-nope-#{rand(100_000)}")])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('does not exist')
+  end
+
+  it 'collects files and fails gracefully at the scoring placeholder' do
+    make_repo(file_count: 5) do |root|
+      status, stdout, stderr = run_cli([root, '--min-files', '5'])
+
+      expect(status).to eq(0)
+      expect(stderr).to be_empty
+      expect(stdout).to include('Note: JavaScript files not analyzed (Phase 1)')
+      expect(stdout).to include('5 Ruby files collected')
+      expect(stdout).to include('scoring not yet implemented')
+    end
+  end
+
+  it 'surfaces too few file threshold failures' do
+    make_repo(file_count: 4) do |root|
+      status, _stdout, stderr = run_cli([root])
+
+      expect(status).to eq(1)
+      expect(stderr).to include('Too few for meaningful analysis')
+    end
+  end
+end
