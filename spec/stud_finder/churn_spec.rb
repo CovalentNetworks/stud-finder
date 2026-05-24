@@ -32,10 +32,10 @@ RSpec.describe StudFinder::Churn do
     )
   end
 
-  it 'skips binary files in numstat output' do
+  it 'counts binary file touches without adding line churn' do
     result = run_churn(stdout: "-\t-\tapp/models/user.rb\n")
 
-    expect(result.counts).to eq('app/models/user.rb' => 0)
+    expect(result.counts).to eq('app/models/user.rb' => 1)
     expect(result.line_counts).to eq('app/models/user.rb' => 0)
   end
 
