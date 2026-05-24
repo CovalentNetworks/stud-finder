@@ -18,7 +18,7 @@ module StudFinder
 
     def call
       constants = constant_ownership
-      references = reference_sets(constants.keys)
+      references = reference_sets(@files)
 
       counts = @files.to_h do |file|
         constant = constants[file]

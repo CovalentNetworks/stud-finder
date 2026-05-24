@@ -66,8 +66,24 @@ RSpec.describe StudFinder::FanIn do
     expect(counts['app/models/foo.rb']).to eq(1)
   end
 
-  it 'assigns zero fan_in to files outside app and lib' do
-    write_file('test/models/user_test.rb', 'class UserTest; User.new; end')
+  it 'counts references from test files toward app and lib constants' do
+    write_file('app/models/user.rb', 'class User; end')
+    write_file('lib/api_client.rb', 'class ApiClient; end')
+    write_file('test/models/user_test.rb', <<~RUBY)
+      class UserTest
+        User.new
+        ApiClient.new
+      end
+    RUBY
+
+    counts = fan_in(['app/models/user.rb', 'lib/api_client.rb', 'test/models/user_test.rb'])
+
+    expect(counts['app/models/user.rb']).to eq(1)
+    expect(counts['lib/api_client.rb']).to eq(1)
+  end
+
+  it 'assigns zero fan_in to test files because they do not own constants' do
+    write_file('test/models/user_test.rb', 'class UserTest; UserTest.new; end')
     write_file('app/models/user.rb', 'class User; end')
 
     counts = fan_in(['test/models/user_test.rb', 'app/models/user.rb'])
