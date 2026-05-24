@@ -74,11 +74,14 @@ RSpec.describe StudFinder::Scorer do
   end
 
   it 'uses 1.0 minus coverage fraction directly instead of percentile ranking coverage' do
-    rows = scorer(coverage: { 'a.rb' => 0.0, 'b.rb' => 1.0, 'c.rb' => 1.0, 'd.rb' => 1.0 },
-                  weights: { fan_in: 0.01, complexity: 0.0, churn: 0.0, coverage: 0.99 }).call
-           .to_h { |row| [row[:path], row] }
+    scorer_with_coverage = scorer(coverage: { 'a.rb' => 0.0, 'b.rb' => nil, 'c.rb' => 1.0, 'd.rb' => 1.0 },
+                                  weights: { fan_in: 0.0, complexity: 0.0, churn: 0.0, coverage: 1.0 })
+
+    expect(scorer_with_coverage.normalized_weights).to eq(fan_in: 0.0, complexity: 0.0, churn: 0.0, coverage: 1.0)
+    rows = scorer_with_coverage.call.to_h { |row| [row[:path], row] }
 
     expect(rows['a.rb'][:score]).to eq(1.0)
+    expect(rows['b.rb'][:score]).to eq(0.0)
     expect(rows['d.rb'][:score]).to eq(0.0)
   end
 

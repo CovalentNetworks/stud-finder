@@ -52,14 +52,21 @@ module StudFinder
 
     def normalize_weights
       three_total = @weights.fetch(:fan_in, 0.0) + @weights.fetch(:complexity, 0.0) + @weights.fetch(:churn, 0.0)
-      raise ValidationError, 'Error: active weights must be greater than 0.0.' if three_total <= 0.0
+      if !coverage_available? && three_total <= 0.0
+        raise ValidationError,
+              'Error: active weights must be greater than 0.0.'
+      end
 
-      @three_factor_weights = {
-        fan_in: @weights.fetch(:fan_in, 0.0) / three_total,
-        complexity: @weights.fetch(:complexity, 0.0) / three_total,
-        churn: @weights.fetch(:churn, 0.0) / three_total,
-        coverage: nil
-      }
+      @three_factor_weights = if three_total > 0.0
+                                {
+                                  fan_in: @weights.fetch(:fan_in, 0.0) / three_total,
+                                  complexity: @weights.fetch(:complexity, 0.0) / three_total,
+                                  churn: @weights.fetch(:churn, 0.0) / three_total,
+                                  coverage: nil
+                                }
+                              else
+                                { fan_in: 0.0, complexity: 0.0, churn: 0.0, coverage: nil }
+                              end
 
       return @weights if coverage_available?
 
