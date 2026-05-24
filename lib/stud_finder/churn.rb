@@ -4,7 +4,24 @@ require 'open3'
 
 module StudFinder
   class Churn
-    Result = Struct.new(:counts, :line_counts, :zero_inflated, :zero_percentage, keyword_init: true)
+    class Result
+      attr_reader :churn_commits, :churn_lines, :zero_inflated, :zero_percentage
+
+      def initialize(zero_inflated:, zero_percentage:, **values)
+        @churn_commits = values[:churn_commits] || values[:counts] || {}
+        @churn_lines = values[:churn_lines] || values[:line_counts] || {}
+        @zero_inflated = zero_inflated
+        @zero_percentage = zero_percentage
+      end
+
+      def counts
+        churn_commits
+      end
+
+      def line_counts
+        churn_lines
+      end
+    end
 
     class Error < StandardError; end
 
@@ -37,8 +54,8 @@ module StudFinder
       end
 
       Result.new(
-        counts: counts,
-        line_counts: line_counts,
+        churn_commits: counts,
+        churn_lines: line_counts,
         zero_inflated: zero_inflated?(counts),
         zero_percentage: zero_percentage(counts)
       ).tap { |result| warn_if_zero_inflated(result) }

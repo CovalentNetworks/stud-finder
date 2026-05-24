@@ -101,7 +101,8 @@ RSpec.describe StudFinder::Scorer do
                   churn_lines: { 'a.rb' => 100, 'b.rb' => 0, 'c.rb' => 0, 'd.rb' => 0 }).call
            .to_h { |row| [row[:path], row] }
 
-    expect(rows['a.rb'][:churn]).to eq(0)
+    expect(rows['a.rb'][:churn_commits]).to eq(0)
+    expect(rows['a.rb'][:churn_lines]).to eq(100)
     expect(rows['a.rb'][:churn_pct]).to eq(0.5)
     expect(rows['b.rb'][:churn_pct]).to eq(0.3333)
     expect(rows['c.rb'][:churn_pct]).to eq(0.5)

@@ -210,7 +210,9 @@ RSpec.describe StudFinder::CLI do
       expect(stdout).to include('5 files analyzed')
       expect(stdout).to include('score')
       expect(stdout).to include('complexity')
-      expect(stdout).to include('churn')
+      expect(stdout).to include('churn_commits')
+      expect(stdout).to include('churn_lines')
+      expect(stdout).to include('churn_pct')
     end
   end
 
@@ -260,6 +262,7 @@ RSpec.describe StudFinder::CLI do
       allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
         StudFinder::Churn::Result.new(
           counts: files.to_h { |path| [path, path == file ? 3 : 0] },
+          line_counts: files.to_h { |path| [path, path == file ? 15 : 0] },
           zero_inflated: false,
           zero_percentage: 0
         )
@@ -273,13 +276,13 @@ RSpec.describe StudFinder::CLI do
       expect(stderr).to include('Score uses 3-factor formula')
       expect(lines.length).to eq(2)
       expect(lines.first).to eq(
-        "rank,file,score,class,fan_in,fan_in_pct,complexity,complexity_pct,churn,churn_pct,coverage\n"
+        "#{StudFinder::CLI::RESULT_COLUMNS.join(',')}\n"
       )
       expect(lines.last).to include('"app/models/model,with_comma.rb"')
       expect(rows.first).to eq(
-        %w[rank file score class fan_in fan_in_pct complexity complexity_pct churn churn_pct coverage]
+        StudFinder::CLI::RESULT_COLUMNS
       )
-      expect(rows.last).to eq(['1', file, '0.5882', 'leaf', '0', '0.0000', '7', '1.0000', '3', '1.0000', ''])
+      expect(rows.last).to eq(['1', file, '0.5882', 'leaf', '0', '0.0000', '7', '1.0000', '3', '15', '1.0000', ''])
       expect(lines.last).to end_with(",\"\"\n")
     end
   end

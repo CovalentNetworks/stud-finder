@@ -52,7 +52,7 @@ RSpec.describe 'fixture repo integration' do
     expect(files.map { |file| file['score'] }).to all(be_between(0.0, 1.0).inclusive)
     expect(files.map { |file| file['score'] }).to eq(files.map { |file| file['score'] }.sort.reverse)
     expect(files.first.keys).to include('rank', 'path', 'score', 'class', 'fan_in', 'fan_in_pct', 'complexity',
-                                        'complexity_pct', 'churn', 'churn_pct', 'coverage')
+                                        'complexity_pct', 'churn_commits', 'churn_lines', 'churn_pct', 'coverage')
   end
 
   it 'emits JSON output with Cobertura coverage integrated' do
@@ -94,7 +94,9 @@ RSpec.describe 'fixture repo integration' do
     stdout, stderr, status = run_cli('--min-files', '5', '--output', 'markdown')
 
     expect(status).to be_success, stderr
-    expect(stdout).to include('| rank | file | score | class | fan_in | complexity | churn | coverage |')
+    expect(stdout).to include(
+      '| rank | file | score | class | fan_in | complexity | churn_commits | churn_lines | churn_pct | coverage |'
+    )
     expect(stdout).to include('| 1 | app/models/user.rb |')
   end
 

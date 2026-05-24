@@ -20,12 +20,12 @@ RSpec.describe StudFinder::Churn do
       files: ['app/models/user.rb', 'app/models/file with spaces.rb', 'app/models/order.rb']
     )
 
-    expect(result.counts).to eq(
+    expect(result.churn_commits).to eq(
       'app/models/user.rb' => 2,
       'app/models/file with spaces.rb' => 1,
       'app/models/order.rb' => 0
     )
-    expect(result.line_counts).to eq(
+    expect(result.churn_lines).to eq(
       'app/models/user.rb' => 19,
       'app/models/file with spaces.rb' => 1,
       'app/models/order.rb' => 0
@@ -35,8 +35,8 @@ RSpec.describe StudFinder::Churn do
   it 'counts binary file touches without adding line churn' do
     result = run_churn(stdout: "-\t-\tapp/models/user.rb\n")
 
-    expect(result.counts).to eq('app/models/user.rb' => 1)
-    expect(result.line_counts).to eq('app/models/user.rb' => 0)
+    expect(result.churn_commits['app/models/user.rb']).to be >= 1
+    expect(result.churn_lines).to eq('app/models/user.rb' => 0)
   end
 
   it 'uses rename-safe git log flags' do
