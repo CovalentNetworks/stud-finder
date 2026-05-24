@@ -55,11 +55,28 @@ RSpec.describe 'fixture repo integration' do
                                         'complexity_pct', 'churn', 'churn_pct', 'coverage')
   end
 
+  it 'emits JSON output with Cobertura coverage integrated' do
+    coverage_path = File.join(repo_path, 'coverage/coverage.xml')
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--coverage', coverage_path)
+    payload = JSON.parse(stdout)
+
+    expect(status).to be_success, stderr
+    expect(payload['meta']['formula']).to eq('4-factor')
+    expect(payload['meta']['weights']['coverage']).to eq(0.15)
+    expect(payload['meta']['warnings']).not_to include('coverage_unavailable')
+    expect(payload['files'].map { |file| file['coverage'] }).not_to include(nil)
+
+    files = payload['files'].to_h { |file| [file['path'], file] }
+    expect(files['app/models/user.rb']['coverage']).to eq(1.0)
+    expect(files['app/services/auth_service.rb']['coverage']).to eq(0.0)
+    expect(files['app/services/auth_service.rb']['score']).to be > files['app/services/post_service.rb']['score']
+  end
+
   it 'emits markdown output' do
     stdout, stderr, status = run_cli('--min-files', '5', '--output', 'markdown')
 
     expect(status).to be_success, stderr
-    expect(stdout).to include('| rank | file | score | class | fan_in | complexity | churn |')
+    expect(stdout).to include('| rank | file | score | class | fan_in | complexity | churn | coverage |')
     expect(stdout).to include('| 1 | app/models/user.rb |')
   end
 

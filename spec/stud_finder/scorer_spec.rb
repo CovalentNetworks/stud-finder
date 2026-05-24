@@ -47,6 +47,32 @@ RSpec.describe StudFinder::Scorer do
     expect(rows['c.rb'][:classification]).to eq('leaf')
   end
 
+  it 'uses four-factor scoring when coverage is provided' do
+    rows = scorer(coverage: { 'a.rb' => 1.0, 'b.rb' => 0.5, 'c.rb' => 0.0, 'd.rb' => 0.25 },
+                  weights: { fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15 }).call
+           .to_h { |row| [row[:path], row] }
+
+    expect(rows['b.rb'][:score]).to be_within(0.0001).of(0.725)
+    expect(rows['b.rb'][:coverage]).to eq(0.5)
+  end
+
+  it 'does not renormalize weights when coverage is active' do
+    weights = scorer(coverage: { 'a.rb' => 1.0, 'b.rb' => 0.5, 'c.rb' => 0.0, 'd.rb' => 0.25 },
+                     weights: { fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15 }).normalized_weights
+
+    expect(weights).to eq(fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15)
+    expect(weights.values.sum).to be_within(0.0001).of(1.0)
+  end
+
+  it 'uses 1.0 minus coverage fraction directly instead of percentile ranking coverage' do
+    rows = scorer(coverage: { 'a.rb' => 0.0, 'b.rb' => 1.0, 'c.rb' => 1.0, 'd.rb' => 1.0 },
+                  weights: { fan_in: 0.0, complexity: 0.0, churn: 0.0, coverage: 1.0 }).call
+           .to_h { |row| [row[:path], row] }
+
+    expect(rows['a.rb'][:score]).to eq(1.0)
+    expect(rows['b.rb'][:score]).to eq(0.0)
+  end
+
   it 'raises when branch threshold is not less than trunk threshold' do
     expect { scorer(branch_threshold: 85, trunk_threshold: 85) }
       .to raise_error(StudFinder::Scorer::ValidationError, /branch-threshold/)
@@ -56,5 +82,29 @@ RSpec.describe StudFinder::Scorer do
     scores = scorer.call.map { |row| row[:score] }
 
     expect(scores).to eq(scores.sort.reverse)
+  end
+end
+
+RSpec.describe StudFinder::Scorer, 'with coverage' do
+  let(:files) { %w[a.rb b.rb] }
+  let(:fan_in) { { 'a.rb' => 1, 'b.rb' => 0 } }
+  let(:complexity) { { 'a.rb' => 0, 'b.rb' => 1 } }
+  let(:churn) { { 'a.rb' => 0, 'b.rb' => 0 } }
+  let(:coverage) { { 'a.rb' => 1.0, 'b.rb' => 0.0 } }
+
+  it 'uses the 4-factor formula without renormalizing weights' do
+    scorer = described_class.new(
+      files: files,
+      fan_in: fan_in,
+      complexity: complexity,
+      churn: churn,
+      coverage: coverage,
+      weights: { fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15 }
+    )
+
+    expect(scorer.normalized_weights).to eq(fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15)
+    rows = scorer.call.to_h { |row| [row[:path], row] }
+    expect(rows['b.rb'][:score]).to eq(0.4) # complexity 1.0 plus uncovered coverage term 1.0
+    expect(rows['a.rb'][:coverage]).to eq(1.0)
   end
 end
