@@ -61,6 +61,7 @@ module StudFinder
         min_files: @options[:min_files],
         stderr: @stderr
       ).collect
+      progress("collecting files... #{result.files.length} found")
 
       analysis = analyze(File.expand_path(path), result.files)
       emit_results(File.expand_path(path), result, analysis)
@@ -193,15 +194,22 @@ module StudFinder
 
     # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     def analyze(path, files)
+      progress('computing fan_in (rubocop-ast)...')
+      fan_in_result = FanIn.new(repo_path: path, files: files).call
+
+      progress('computing complexity (rubocop)...')
       complexity_result = Complexity.new(repo_path: path, files: files, stderr: @stderr).call
       analysis_files = files - complexity_result.skipped_files
-      fan_in_result = FanIn.new(repo_path: path, files: analysis_files).call
+
+      progress("computing churn (git log, #{@options[:churn_days]} days)...")
       churn_result = Churn.new(
         repo_path: path,
         files: analysis_files,
         days: @options[:churn_days],
         stderr: @stderr
       ).call
+
+      progress("normalizing + scoring #{analysis_files.length} files...")
 
       coverage_parser = nil
       coverage_result = nil
@@ -233,7 +241,7 @@ module StudFinder
         @stderr.puts scoring_note(weights: scorer.normalized_weights, stderr: true)
       end
 
-      Analysis.new(
+      analysis = Analysis.new(
         files: analysis_files,
         fan_in: fan_in_result.counts,
         complexity: complexity_result.counts,
@@ -245,6 +253,8 @@ module StudFinder
         rows: scorer.call,
         weights: scorer.normalized_weights
       )
+      progress('done')
+      analysis
     end
     # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
@@ -372,6 +382,10 @@ module StudFinder
         format('Note: coverage data not available. Score uses fan_in %<fan_in>.2f, complexity %<complexity>.2f, ' \
                'churn %<churn>.2f.', **weights)
       end
+    end
+
+    def progress(message)
+      @stderr.puts "stud-finder → #{message}"
     end
 
     def footer(result, analysis)

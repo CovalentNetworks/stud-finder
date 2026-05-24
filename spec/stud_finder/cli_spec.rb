@@ -156,6 +156,37 @@ RSpec.describe StudFinder::CLI do
     end
   end
 
+  it 'emits progress to stderr without changing stdout output' do
+    make_repo(file_count: 5) do |root|
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      analyzed_files = files.drop(1)
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(
+          counts: analyzed_files.to_h { |file| [file, 0] },
+          skipped_files: [files.first]
+        )
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(
+          counts: analyzed_files.to_h { |file| [file, 0] },
+          zero_inflated: false,
+          zero_percentage: 0
+        )
+      )
+
+      status, stdout, stderr = run_cli([root, '--min-files', '5', '--churn-days', '12', '--output', 'json'])
+
+      expect(status).to eq(0)
+      expect(JSON.parse(stdout).dig('meta', 'file_count')).to eq(4)
+      expect(stderr).to include("stud-finder → collecting files... 5 found\n")
+      expect(stderr).to include("stud-finder → computing fan_in (rubocop-ast)...\n")
+      expect(stderr).to include("stud-finder → computing complexity (rubocop)...\n")
+      expect(stderr).to include("stud-finder → computing churn (git log, 12 days)...\n")
+      expect(stderr).to include("stud-finder → normalizing + scoring 4 files...\n")
+      expect(stderr).to include("stud-finder → done\n")
+    end
+  end
+
   it 'emits spreadsheet-ready csv output' do
     make_repo(file_count: 5) do |root|
       comma_path = File.join(root, 'app/models/model,with_comma.rb')
