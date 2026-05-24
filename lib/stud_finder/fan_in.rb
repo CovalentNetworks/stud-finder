@@ -7,8 +7,7 @@ module StudFinder
   class FanIn
     Result = Struct.new(:counts, keyword_init: true)
 
-    AUTOLOAD_ROOTS = %w[app lib].freeze
-    PATH_ROOTS = (AUTOLOAD_ROOTS + %w[test]).freeze
+    PATH_ROOTS = %w[app lib test].freeze
     CLASS_OR_MODULE_TYPES = %i[class module].freeze
 
     def initialize(repo_path:, files:)
@@ -33,11 +32,10 @@ module StudFinder
     private
 
     def constant_ownership
-      @files.each_with_object({}) do |file, constants|
-        next unless owned_path?(file)
-
-        constants[file] = primary_constant(file) || zeitwerk_constant(file)
-      end.compact
+      @files.filter_map do |file|
+        constant = zeitwerk_constant(file) || primary_constant(file)
+        [file, constant] if constant
+      end.to_h
     end
 
     def reference_sets(source_files)
@@ -103,7 +101,10 @@ module StudFinder
       basename = components.pop&.delete_suffix('.rb')
       return if basename.nil? || basename.empty?
 
-      (components + [basename]).map { |component| camelize(component) }.join('::')
+      constant = (components + [basename]).map { |component| camelize(component) }.join('::')
+      return unless valid_constant_name?(constant)
+
+      constant
     end
 
     def strip_app_concerns_namespace(components)
@@ -117,8 +118,8 @@ module StudFinder
       segment.split('_').map(&:capitalize).join
     end
 
-    def owned_path?(file)
-      root_component(file)&.then { |root| AUTOLOAD_ROOTS.include?(root) }
+    def valid_constant_name?(constant)
+      constant.match?(/\A[A-Z]\w*(?:::[A-Z]\w*)*\z/)
     end
 
     def path_after_root(file)
@@ -126,11 +127,9 @@ module StudFinder
       index = components.index { |component| PATH_ROOTS.include?(component) }
       return unless index
 
-      components[(index + 1)..]
-    end
-
-    def root_component(file)
-      file.split('/').find { |component| PATH_ROOTS.include?(component) }
+      root = components[index]
+      remaining = components[(index + 1)..]
+      root == 'app' ? remaining[1..] : remaining
     end
   end
 end
