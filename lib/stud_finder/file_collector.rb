@@ -14,12 +14,26 @@ module StudFinder
       'tmp/**',
       'log/**',
       'spec/**',
-      'test/**'
+      'test/**',
+      '__tests__/**',
+      '**/*.test.js',
+      '**/*.test.ts',
+      '**/*.spec.js',
+      '**/*.spec.ts'
     ].freeze
+
+    EXTENSIONS = %w[.rb .js .ts .jsx .tsx].freeze
+    LANGUAGES = {
+      '.rb' => :ruby,
+      '.js' => :javascript,
+      '.jsx' => :javascript,
+      '.ts' => :typescript,
+      '.tsx' => :typescript
+    }.freeze
 
     FNM_FLAGS = File::FNM_PATHNAME | File::FNM_DOTMATCH
 
-    Result = Struct.new(:files, :default_excluded_count, :custom_excluded_count, keyword_init: true)
+    Result = Struct.new(:files, :languages, :default_excluded_count, :custom_excluded_count, keyword_init: true)
 
     class Error < StandardError; end
 
@@ -35,10 +49,14 @@ module StudFinder
 
       default_excluded = 0
       custom_excluded = 0
-      files = Dir.glob(File.join(@path, '**', '*.rb'), File::FNM_DOTMATCH)
+      languages = {}
+      files = Dir.glob(File.join(@path, '**', '*'), File::FNM_DOTMATCH)
                  .select { |file| File.file?(file) }
                  .sort
                  .filter_map do |file|
+        extension = File.extname(file)
+        next unless EXTENSIONS.include?(extension)
+
         relative = relative_path(file)
 
         if default_excluded?(relative, file)
@@ -51,11 +69,13 @@ module StudFinder
           next
         end
 
+        languages[relative] = LANGUAGES.fetch(extension)
         relative
       end
 
       if files.length < 5
-        raise Error, "Error: only #{files.length} .rb files found after excludes. Too few for meaningful analysis."
+        raise Error,
+              "Error: only #{files.length} supported files found after excludes. Too few for meaningful analysis."
       end
 
       if files.length < @min_files
@@ -63,7 +83,8 @@ module StudFinder
                      'Results are advisory only.'
       end
 
-      Result.new(files: files, default_excluded_count: default_excluded, custom_excluded_count: custom_excluded)
+      Result.new(files: files, languages: languages, default_excluded_count: default_excluded,
+                 custom_excluded_count: custom_excluded)
     end
 
     private

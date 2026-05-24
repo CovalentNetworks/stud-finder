@@ -68,6 +68,9 @@ RSpec.describe StudFinder::CLI do
     expect(stdout.string).to include('--weights')
     expect(stdout.string).to include('--churn-days N')
     expect(stdout.string).to include('default: 180')
+    expect(stdout.string).to include('--ruby-coverage')
+    expect(stdout.string).to include('--js-coverage')
+    expect(stdout.string).to include('--js-timeout')
     expect(stdout.string).to include('--coverage')
   end
 
@@ -79,6 +82,35 @@ RSpec.describe StudFinder::CLI do
       expect(error.status).to eq(0)
     end
     expect(stdout.string).to include(StudFinder::VERSION)
+  end
+
+  it 'emits a deprecation warning when --coverage alias is used' do
+    make_repo(file_count: 5) do |root|
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      coverage = write_coverage_report(root, files)
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: files.to_h { |file| [file, 0] }, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(counts: files.to_h { |file| [file, 0] }, zero_inflated: false, zero_percentage: 0)
+      )
+
+      status, _stdout, stderr = run_cli([root, '--min-files', '5', '--coverage', coverage, '--output', 'json'])
+
+      expect(status).to eq(0)
+      expect(stderr).to include('coverage_flag_deprecated')
+    end
+  end
+
+  it 'validates --js-coverage and --js-timeout' do
+    missing = File.join(Dir.tmpdir, "stud-finder-js-coverage-nope-#{rand(100_000)}.info")
+    status, _stdout, stderr = run_cli(['--js-coverage', missing])
+    expect(status).to eq(1)
+    expect(stderr).to include("Error: JS coverage file not found: #{missing}")
+
+    status, _stdout, stderr = run_cli(['--js-timeout', '0'])
+    expect(status).to eq(1)
+    expect(stderr).to include('--js-timeout must be positive')
   end
 
   it 'validates weights that do not sum to 1.0' do
@@ -131,7 +163,7 @@ RSpec.describe StudFinder::CLI do
 
       expect(status).to eq(0)
       expect(stderr).not_to include('coverage weight must be 0.0')
-      expect(JSON.parse(stdout).dig('meta', 'formula')).to eq('4-factor')
+      expect(JSON.parse(stdout).fetch('ruby').map { |file| file['coverage'] }.uniq).to eq([0.5])
     end
   end
 
@@ -149,7 +181,7 @@ RSpec.describe StudFinder::CLI do
       status, stdout, stderr = run_cli([root, '--min-files', '5', '--coverage', coverage, '--output', 'json'])
 
       expect(status).to eq(0), stderr
-      expect(JSON.parse(stdout).fetch('files').map { |file| file['coverage'] }.uniq).to eq([0.5])
+      expect(JSON.parse(stdout).fetch('ruby').map { |file| file['coverage'] }.uniq).to eq([0.5])
     end
   end
 
@@ -167,7 +199,7 @@ RSpec.describe StudFinder::CLI do
       status, stdout, stderr = run_cli([root, '--min-files', '5', '--coverage', coverage, '--output', 'json'])
 
       expect(status).to eq(0), stderr
-      expect(JSON.parse(stdout).fetch('files').map { |file| file['coverage'] }.uniq).to eq([0.5])
+      expect(JSON.parse(stdout).fetch('ruby').map { |file| file['coverage'] }.uniq).to eq([0.5])
     end
   end
 
@@ -206,7 +238,7 @@ RSpec.describe StudFinder::CLI do
 
       expect(status).to eq(0)
       expect(stderr).to include('Score uses 3-factor formula')
-      expect(stdout).to include('Note: JavaScript files not analyzed (Phase 1)')
+      expect(stdout).to include('JavaScript/TypeScript')
       expect(stdout).to include('5 files analyzed')
       expect(stdout).to include('score')
       expect(stdout).to include('complexity')
@@ -237,11 +269,11 @@ RSpec.describe StudFinder::CLI do
       status, stdout, stderr = run_cli([root, '--min-files', '5', '--churn-days', '12', '--output', 'json'])
 
       expect(status).to eq(0)
-      expect(JSON.parse(stdout).dig('meta', 'file_count')).to eq(4)
+      expect(JSON.parse(stdout).fetch('ruby').length).to eq(4)
       expect(stderr).to include("stud-finder → collecting files... 5 found\n")
-      expect(stderr).to include("stud-finder → computing fan_in (rubocop-ast)...\n")
-      expect(stderr).to include("stud-finder → computing complexity (rubocop)...\n")
-      expect(stderr).to include("stud-finder → computing churn (git log, 12 days)...\n")
+      expect(stderr).to include("stud-finder → computing Ruby fan_in (rubocop-ast)...\n")
+      expect(stderr).to include("stud-finder → computing Ruby complexity (rubocop)...\n")
+      expect(stderr).to include("stud-finder → computing Ruby churn (git log, 12 days)...\n")
       expect(stderr).to include("stud-finder → normalizing + scoring 4 files...\n")
       expect(stderr).to include("stud-finder → done\n")
     end
