@@ -27,13 +27,13 @@ module StudFinder
         next if line.empty?
 
         added, deleted, path = line.split("\t", 3)
-        next if added == '-' || path.nil?
+        next if path.nil?
 
         relative = normalize_path(path)
         next unless file_set[relative]
 
         counts[relative] += 1
-        line_counts[relative] += added.to_i + deleted.to_i
+        line_counts[relative] += added.to_i + deleted.to_i if added != '-' && numeric?(deleted)
       end
 
       Result.new(
@@ -66,6 +66,10 @@ module StudFinder
     def normalize_path(path)
       absolute = File.expand_path(path, @repo_path)
       absolute.start_with?("#{@repo_path}/") ? absolute.delete_prefix("#{@repo_path}/") : path
+    end
+
+    def numeric?(value)
+      value&.match?(/\A\d+\z/)
     end
 
     def zero_inflated?(counts)
