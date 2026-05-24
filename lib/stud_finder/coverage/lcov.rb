@@ -47,7 +47,7 @@ module StudFinder
           hit = lines.count(&:positive?)
         end
 
-        raise Error, "Error: missing line coverage for coverage file: #{filename}" if found.zero?
+        return 0.0 if found.zero?
         raise Error, "Error: line hits exceed lines found for coverage file: #{filename}" if hit > found
 
         hit.to_f / found

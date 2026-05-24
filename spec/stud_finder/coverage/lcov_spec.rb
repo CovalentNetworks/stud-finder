@@ -55,12 +55,9 @@ RSpec.describe StudFinder::Coverage::Lcov do
     expect(coverage['app/models/post.rb']).to be_nil
   end
 
-  it 'raises a descriptive error when line coverage is missing' do
-    path = write_report("SF:app/models/user.rb\nend_of_record\n")
-    parser = described_class.new(path: path, files: ['app/models/user.rb'])
+  it 'returns 0.0 when a record has no DA lines' do
+    coverage = parse("SF:app/models/empty.rb\nend_of_record\n", files: ['app/models/empty.rb'])
 
-    expect { parser.call }.to raise_error(StudFinder::Coverage::Lcov::Error, /missing line coverage/)
-  ensure
-    FileUtils.rm_f(path) if path
+    expect(coverage['app/models/empty.rb']).to eq(0.0)
   end
 end

@@ -25,18 +25,29 @@ module StudFinder
 
       def parse_report
         data = JSON.parse(File.read(@path))
-        coverage_payloads(data).each_with_object({}) do |coverage, reported|
+        merged = {}
+
+        coverage_payloads(data).each do |coverage|
           coverage.each do |filename, details|
             lines = details.is_a?(Hash) ? details['lines'] : details
             next unless lines.is_a?(Array)
 
-            reported[normalize_filename(filename)] = line_rate(lines, filename)
+            key = normalize_filename(filename)
+            merged[key] = merged.key?(key) ? merge_lines(merged[key], lines) : lines
           end
         end
+
+        merged.transform_values { |lines| line_rate(lines) }
       rescue JSON::ParserError => e
         raise Error, "Error: malformed coverage JSON: #{e.message.lines.first.strip}"
       rescue Errno::ENOENT
         raise Error, "Error: coverage file not found: #{@path}"
+      end
+
+      def merge_lines(previous_lines, new_lines)
+        previous_lines.zip(new_lines).map do |previous, current|
+          previous.nil? && current.nil? ? nil : [previous || 0, current || 0].max
+        end
       end
 
       def coverage_payloads(data)
@@ -51,9 +62,9 @@ module StudFinder
         filename.delete_prefix('./')
       end
 
-      def line_rate(lines, filename)
+      def line_rate(lines)
         executable = lines.compact
-        raise Error, "Error: missing line coverage for coverage file: #{filename}" if executable.empty?
+        return 0.0 if executable.empty?
 
         executable.count(&:positive?).to_f / executable.length
       end

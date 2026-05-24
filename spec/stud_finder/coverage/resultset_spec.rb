@@ -62,6 +62,41 @@ RSpec.describe StudFinder::Coverage::Resultset do
     expect(coverage['app/models/post.rb']).to be_nil
   end
 
+  it 'max-merges line hits from multiple suites' do
+    coverage = parse_resultset(
+      {
+        'RSpec' => {
+          'coverage' => {
+            'app/models/user.rb' => { 'lines' => [3] }
+          }
+        },
+        'Minitest' => {
+          'coverage' => {
+            'app/models/user.rb' => { 'lines' => [0] }
+          }
+        }
+      },
+      files: ['app/models/user.rb']
+    )
+
+    expect(coverage['app/models/user.rb']).to eq(1.0)
+  end
+
+  it 'returns 0.0 when all lines are null' do
+    coverage = parse_resultset(
+      {
+        'RSpec' => {
+          'coverage' => {
+            'app/models/user.rb' => { 'lines' => [nil, nil] }
+          }
+        }
+      },
+      files: ['app/models/user.rb']
+    )
+
+    expect(coverage['app/models/user.rb']).to eq(0.0)
+  end
+
   it 'raises a descriptive error for malformed JSON' do
     file = Tempfile.new(['resultset', '.json'])
     file.write('{')
