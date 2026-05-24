@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'csv'
 require 'json'
 require 'optparse'
 require 'time'
@@ -13,7 +14,7 @@ require_relative 'version'
 module StudFinder
   # rubocop:disable Metrics/ClassLength
   class CLI
-    OUTPUT_FORMATS = %w[table json markdown].freeze
+    OUTPUT_FORMATS = %w[table json markdown csv].freeze
     WEIGHT_KEYS = %i[fan_in complexity churn coverage].freeze
     DEFAULT_OPTIONS = {
       output: 'table',
@@ -76,7 +77,8 @@ module StudFinder
         opts.separator ''
         opts.separator 'Options:'
 
-        opts.on('--output FORMAT', OUTPUT_FORMATS, 'Output format: table, json, markdown (default: table)') do |value|
+        opts.on('--output FORMAT', OUTPUT_FORMATS,
+                'Output format: table, json, markdown, csv (default: table)') do |value|
           @options[:output] = value
         end
         opts.on('--churn-days N', Integer, 'Commit lookback window in days (default: 90)') do |value|
@@ -223,8 +225,19 @@ module StudFinder
         emit_json(path, analysis, rows)
       when 'markdown'
         emit_markdown(analysis, rows)
+      when 'csv'
+        emit_csv(rows)
       else
         emit_table(path, result, analysis, rows)
+      end
+    end
+
+    def emit_csv(rows)
+      @stdout << CSV.generate_line(
+        %w[rank file score class fan_in fan_in_pct complexity complexity_pct churn churn_pct coverage]
+      )
+      rows.each do |row|
+        @stdout << CSV.generate_line(csv_file(row))
       end
     end
 
@@ -290,6 +303,22 @@ module StudFinder
         churn_pct: row[:churn_pct],
         coverage: nil
       }
+    end
+
+    def csv_file(row)
+      [
+        row[:rank],
+        row[:path],
+        format_score(row[:score]),
+        row[:classification],
+        row[:fan_in],
+        format_score(row[:fan_in_pct]),
+        row[:complexity],
+        format_score(row[:complexity_pct]),
+        row[:churn],
+        format_score(row[:churn_pct]),
+        ''
+      ]
     end
 
     def json_weights(weights)

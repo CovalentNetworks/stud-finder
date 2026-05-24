@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'csv'
 require 'spec_helper'
 require 'stud_finder/cli'
 
@@ -105,6 +106,45 @@ RSpec.describe StudFinder::CLI do
       expect(stdout).to include('score')
       expect(stdout).to include('complexity')
       expect(stdout).to include('churn')
+    end
+  end
+
+  it 'emits spreadsheet-ready csv output' do
+    make_repo(file_count: 5) do |root|
+      comma_path = File.join(root, 'app/models/model,with_comma.rb')
+      FileUtils.rm_f(File.join(root, 'app/models/model_0.rb'))
+      File.write(comma_path, "class ModelWithComma\nend\n")
+      file = 'app/models/model,with_comma.rb'
+      files = Array.new(4) { |i| "app/models/model_#{i + 1}.rb" } + [file]
+
+      complexity_counts = files.to_h { |path| [path, path == file ? 7 : 0] }
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: complexity_counts, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(
+          counts: files.to_h { |path| [path, path == file ? 3 : 0] },
+          zero_inflated: false,
+          zero_percentage: 0
+        )
+      )
+
+      status, stdout, stderr = run_cli([root, '--min-files', '5', '--top', '1', '--output', 'csv'])
+      lines = stdout.lines
+      rows = CSV.parse(stdout, nil_value: '')
+
+      expect(status).to eq(0)
+      expect(stderr).to include('Score uses 3-factor formula')
+      expect(lines.length).to eq(2)
+      expect(lines.first).to eq(
+        "rank,file,score,class,fan_in,fan_in_pct,complexity,complexity_pct,churn,churn_pct,coverage\n"
+      )
+      expect(lines.last).to include('"app/models/model,with_comma.rb"')
+      expect(rows.first).to eq(
+        %w[rank file score class fan_in fan_in_pct complexity complexity_pct churn churn_pct coverage]
+      )
+      expect(rows.last).to eq(['1', file, '0.5882', 'leaf', '0', '0.0000', '7', '1.0000', '3', '1.0000', ''])
+      expect(lines.last).to end_with(",\"\"\n")
     end
   end
 
