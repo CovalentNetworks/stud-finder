@@ -85,9 +85,9 @@ RSpec.describe 'fixture repo integration' do
 
     files = payload['files'].to_h { |file| [file['path'], file] }
     expect(files['app/models/post.rb']['coverage']).to be_nil
-    expect(files['app/models/post.rb']['score']).to be_within(0.0001).of(0.3706)
+    expect(files['app/models/post.rb']['score']).to be_within(0.0001).of(0.366)
     expect(files['app/models/profile.rb']['coverage']).to eq(0.75)
-    expect(files['app/models/profile.rb']['score']).to be_within(0.0001).of(0.3175)
+    expect(files['app/models/profile.rb']['score']).to be_within(0.0001).of(0.3097)
   end
 
   it 'emits markdown output' do

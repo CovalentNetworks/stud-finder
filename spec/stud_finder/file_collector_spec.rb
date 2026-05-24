@@ -32,6 +32,8 @@ RSpec.describe StudFinder::FileCollector do
       write_file(root, 'vendor/gem/lib/vendor_file.rb')
       write_file(root, 'tmp/cache/temp.rb')
       write_file(root, 'log/generated.rb')
+      write_file(root, 'spec/models/user_spec.rb')
+      write_file(root, 'test/models/user_test.rb')
       write_file(root, 'app/models/generated.rb', "\n# This file is auto-generated\nclass Generated\nend\n")
 
       result = collect(root)
@@ -43,7 +45,7 @@ RSpec.describe StudFinder::FileCollector do
         'app/models/payment.rb',
         'app/models/user.rb'
       )
-      expect(result.default_excluded_count).to eq(6)
+      expect(result.default_excluded_count).to eq(8)
     end
   end
 

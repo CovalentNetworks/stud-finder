@@ -12,7 +12,9 @@ module StudFinder
       'vendor/**',
       '**/*.min.js',
       'tmp/**',
-      'log/**'
+      'log/**',
+      'spec/**',
+      'test/**'
     ].freeze
 
     FNM_FLAGS = File::FNM_PATHNAME | File::FNM_DOTMATCH
