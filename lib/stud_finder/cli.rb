@@ -180,7 +180,7 @@ module StudFinder
         stderr: @stderr
       ).call
       warnings = %w[coverage_unavailable js_not_analyzed]
-      warnings << 'churn_signal_weak' if churn_result.zero_inflated
+      warnings << 'zero_churn_majority' if churn_result.zero_inflated
 
       Analysis.new(
         files: analysis_files,

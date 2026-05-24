@@ -13,35 +13,51 @@ RSpec.describe StudFinder::Complexity do
     JSON.generate('files' => files)
   end
 
-  def run_complexity(stdout:, status: status(0), files: ['app/models/user.rb'], stderr: StringIO.new)
-    allow(Open3).to receive(:capture3).and_return([stdout, '', status])
-
-    described_class.new(repo_path: '/repo', files: files, stderr: stderr).call
+  def complexity_offense(method_name, score)
+    {
+      'cop_name' => 'Metrics/CyclomaticComplexity',
+      'message' => "Cyclomatic complexity for `#{method_name}` is too high. [#{score}/0]"
+    }
   end
 
-  it 'parses RuboCop JSON and sums per-method complexity per file' do
+  def run_complexity(
+    stdout:, status: status(0), files: ['app/models/user.rb'], repo_path: '/repo', stderr: StringIO.new
+  )
+    allow(Open3).to receive(:capture3).and_return([stdout, '', status])
+
+    described_class.new(repo_path: repo_path, files: files, stderr: stderr).call
+  end
+
+  it 'parses simple-method complexity reported by the Max 0 RuboCop config' do
+    stdout = rubocop_json([
+                            {
+                              'path' => '/repo/app/models/user.rb',
+                              'offenses' => [complexity_offense('name', 1)]
+                            }
+                          ])
+
+    result = run_complexity(stdout: stdout)
+
+    expect(result.counts).to eq('app/models/user.rb' => 1)
+  end
+
+  it 'sums all method complexity scores per file instead of only default-threshold offenses' do
     stdout = rubocop_json([
                             {
                               'path' => '/repo/app/models/user.rb',
                               'offenses' => [
-                                {
-                                  'cop_name' => 'Metrics/CyclomaticComplexity',
-                                  'message' => 'Cyclomatic complexity for create is too high. [8/7]'
-                                },
-                                {
-                                  'cop_name' => 'Metrics/CyclomaticComplexity',
-                                  'message' => 'Cyclomatic complexity for update is too high. [3/2]'
-                                }
+                                complexity_offense('simple', 1),
+                                complexity_offense('branching', 2)
                               ]
                             }
                           ])
 
     result = run_complexity(stdout: stdout)
 
-    expect(result.counts).to eq('app/models/user.rb' => 11)
+    expect(result.counts).to eq('app/models/user.rb' => 3)
   end
 
-  it 'keeps files with no reported methods at zero' do
+  it 'keeps files with no methods at zero' do
     result = run_complexity(stdout: rubocop_json([]), files: ['app/models/user.rb'])
 
     expect(result.counts).to eq('app/models/user.rb' => 0)
@@ -72,12 +88,7 @@ RSpec.describe StudFinder::Complexity do
                             },
                             {
                               'path' => '/repo/app/models/good.rb',
-                              'offenses' => [
-                                {
-                                  'cop_name' => 'Metrics/CyclomaticComplexity',
-                                  'message' => 'Cyclomatic complexity for call is too high. [5/3]'
-                                }
-                              ]
+                              'offenses' => [complexity_offense('call', 2)]
                             }
                           ])
 
@@ -87,21 +98,31 @@ RSpec.describe StudFinder::Complexity do
       stderr: stderr
     )
 
-    expect(result.counts).to eq('app/models/good.rb' => 5)
+    expect(result.counts).to eq('app/models/good.rb' => 2)
     expect(result.skipped_files).to eq(['app/models/bad.rb'])
     expect(stderr.string).to include('Warning: skipping app/models/bad.rb')
   end
 
-  it 'uses --no-config in the RuboCop subprocess command' do
-    run_complexity(stdout: rubocop_json([]))
+  it 'uses a temporary RuboCop config that enables only cyclomatic complexity with Max 0' do
+    captured_config = nil
+    allow(Open3).to receive(:capture3) do |*args|
+      config_path = args.fetch(args.index('--config') + 1)
+      captured_config = File.read(config_path)
+      [rubocop_json([]), '', status(0)]
+    end
+
+    described_class.new(repo_path: '/repo', files: ['app/models/user.rb']).call
 
     expect(Open3).to have_received(:capture3).with(
       'rubocop',
-      '--no-config',
-      '--only', 'Metrics/CyclomaticComplexity',
+      '--config', kind_of(String),
       '--format', 'json',
       '/repo'
     )
+    expect(captured_config).to include('DisabledByDefault: true')
+    expect(captured_config).to include('Metrics/CyclomaticComplexity:')
+    expect(captured_config).to include('Enabled: true')
+    expect(captured_config).to include('Max: 0')
   end
 
   it 'raises the required message when rubocop is not in PATH' do

@@ -2,6 +2,7 @@
 
 require 'json'
 require 'open3'
+require 'tempfile'
 
 module StudFinder
   class Complexity
@@ -10,8 +11,15 @@ module StudFinder
     class Error < StandardError; end
 
     COMPLEXITY_COP = 'Metrics/CyclomaticComplexity'
-    COMPLEXITY_PATTERN = %r{\[(\d+)/\d+\]}
+    COMPLEXITY_PATTERN = %r{\[(\d+)/0\]}
     PARSE_ERROR_COPS = %w[Lint/Syntax].freeze
+    RUBOCOP_CONFIG = <<~YAML
+      AllCops:
+        DisabledByDefault: true
+      Metrics/CyclomaticComplexity:
+        Enabled: true
+        Max: 0
+    YAML
 
     def initialize(repo_path:, files:, stderr: $stderr)
       @repo_path = File.expand_path(repo_path)
@@ -34,26 +42,17 @@ module StudFinder
     private
 
     def run_rubocop
-      stdout, stderr, status = Open3.capture3(
-        'rubocop',
-        '--no-config',
-        '--only', COMPLEXITY_COP,
-        '--format', 'json',
-        @repo_path
-      )
-      return [stdout, stderr, status] unless unsupported_no_config?(stderr, status)
+      Tempfile.create(['stud-finder-rubocop', '.yml']) do |config|
+        config.write(RUBOCOP_CONFIG)
+        config.close
 
-      Open3.capture3(
-        'rubocop',
-        '--force-default-config',
-        '--only', COMPLEXITY_COP,
-        '--format', 'json',
-        @repo_path
-      )
-    end
-
-    def unsupported_no_config?(stderr, status)
-      status.exitstatus == 2 && stderr.include?('invalid option: --no-config')
+        Open3.capture3(
+          'rubocop',
+          '--config', config.path,
+          '--format', 'json',
+          @repo_path
+        )
+      end
     end
 
     def parse(stdout)
