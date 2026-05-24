@@ -14,9 +14,9 @@ RSpec.describe StudFinder::Churn do
     described_class.new(repo_path: '/repo', files: files, days: days, stderr: stderr).call
   end
 
-  it 'parses NUL-delimited git output and keeps zeroes for files not appearing' do
+  it 'parses numstat git output into commit touches and line counts' do
     result = run_churn(
-      stdout: "app/models/user.rb\0app/models/user.rb\0app/models/file with spaces.rb\0",
+      stdout: "10\t2\tapp/models/user.rb\n3\t4\tapp/models/user.rb\n1\t0\tapp/models/file with spaces.rb\n",
       files: ['app/models/user.rb', 'app/models/file with spaces.rb', 'app/models/order.rb']
     )
 
@@ -25,6 +25,18 @@ RSpec.describe StudFinder::Churn do
       'app/models/file with spaces.rb' => 1,
       'app/models/order.rb' => 0
     )
+    expect(result.line_counts).to eq(
+      'app/models/user.rb' => 19,
+      'app/models/file with spaces.rb' => 1,
+      'app/models/order.rb' => 0
+    )
+  end
+
+  it 'skips binary files in numstat output' do
+    result = run_churn(stdout: "-\t-\tapp/models/user.rb\n")
+
+    expect(result.counts).to eq('app/models/user.rb' => 0)
+    expect(result.line_counts).to eq('app/models/user.rb' => 0)
   end
 
   it 'uses rename-safe git log flags' do
@@ -34,9 +46,9 @@ RSpec.describe StudFinder::Churn do
       'git', '-C', '/repo', 'log',
       '--since=90 days ago',
       '--format=tformat:',
-      '-z',
-      '--diff-filter=ACDMR',
-      '--name-only'
+      '--numstat',
+      '--no-merges',
+      '--diff-filter=ACDMR'
     )
   end
 
@@ -44,7 +56,7 @@ RSpec.describe StudFinder::Churn do
     stderr = StringIO.new
 
     result = run_churn(
-      stdout: "app/models/a.rb\0",
+      stdout: "1\t0\tapp/models/a.rb\n",
       files: ['app/models/a.rb', 'app/models/b.rb', 'app/models/c.rb'],
       days: 7,
       stderr: stderr

@@ -41,7 +41,7 @@ RSpec.describe StudFinder::Complexity do
     expect(result.counts).to eq('app/models/user.rb' => 1)
   end
 
-  it 'sums all method complexity scores per file instead of only default-threshold offenses' do
+  it 'uses the maximum method complexity score per file instead of summing methods' do
     stdout = rubocop_json([
                             {
                               'path' => '/repo/app/models/user.rb',
@@ -54,7 +54,7 @@ RSpec.describe StudFinder::Complexity do
 
     result = run_complexity(stdout: stdout)
 
-    expect(result.counts).to eq('app/models/user.rb' => 3)
+    expect(result.counts).to eq('app/models/user.rb' => 2)
   end
 
   it 'keeps files with no methods at zero' do
