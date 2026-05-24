@@ -120,11 +120,11 @@ Glob matching: `File.fnmatch(pattern, relative_path, File::FNM_PATHNAME | File::
 
 Each file owns one constant — its **primary constant**. Determination order:
 
-1. **AST scan first:** parse the file with `rubocop-ast`. Walk the AST. Find the first `class` or `module` node at the top level of the file — i.e., not nested inside another `class` or `module` node. Use its resolved constant name (e.g., `Billing::Invoice`).
+1. **Zeitwerk path mapping first:** for files under `app/`, `lib/`, or `test/` (relative to `PATH`), derive the primary constant from the file path using Zeitwerk rules (see below). This avoids assigning every namespace-wrapped file to its outer namespace module.
 
-2. **Zeitwerk fallback:** if no top-level class or module node is found (constants-only file, DSL-only file, etc.), derive the constant from the file path using Zeitwerk rules (see below).
+2. **AST scan fallback:** when Zeitwerk mapping does not apply or produces no valid constant, parse the file with `rubocop-ast`. Walk the AST. Find the first `class` or `module` node at the top level of the file — i.e., not nested inside another `class` or `module` node. Use its resolved constant name (e.g., `Billing::Invoice`).
 
-3. **No ownership:** if the file does not reside under `app/`, `lib/`, or `test/` (relative to `PATH`), skip constant mapping and assign `fan_in = 0`.
+3. **No ownership:** if the file is outside `app/`, `lib/`, and `test/` and the AST fallback finds no top-level class or module, assign `fan_in = 0`.
 
 #### 2b. Zeitwerk path-to-constant mapping
 
