@@ -51,26 +51,41 @@ module StudFinder
     end
 
     def normalize_weights
+      three_total = @weights.fetch(:fan_in, 0.0) + @weights.fetch(:complexity, 0.0) + @weights.fetch(:churn, 0.0)
+      if !coverage_available? && three_total <= 0.0
+        raise ValidationError,
+              'Error: active weights must be greater than 0.0.'
+      end
+
+      @three_factor_weights = if three_total > 0.0
+                                {
+                                  fan_in: @weights.fetch(:fan_in, 0.0) / three_total,
+                                  complexity: @weights.fetch(:complexity, 0.0) / three_total,
+                                  churn: @weights.fetch(:churn, 0.0) / three_total,
+                                  coverage: nil
+                                }
+                              else
+                                { fan_in: 0.0, complexity: 0.0, churn: 0.0, coverage: nil }
+                              end
+
       return @weights if coverage_available?
 
-      active_total = @weights.fetch(:fan_in, 0.0) + @weights.fetch(:complexity, 0.0) + @weights.fetch(:churn, 0.0)
-      raise ValidationError, 'Error: active weights must be greater than 0.0.' if active_total <= 0.0
-
-      {
-        fan_in: @weights.fetch(:fan_in, 0.0) / active_total,
-        complexity: @weights.fetch(:complexity, 0.0) / active_total,
-        churn: @weights.fetch(:churn, 0.0) / active_total,
-        coverage: nil
-      }
+      @three_factor_weights
     end
 
     def weighted_score(file, fan_in_pct, complexity_pct, churn_pct)
-      score = (@normalized_weights[:fan_in] * fan_in_pct.fetch(file)) +
-              (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
-              (@normalized_weights[:churn] * churn_pct.fetch(file))
-      return score unless coverage_available?
+      file_coverage = @coverage.fetch(file, nil) if coverage_available?
 
-      score + (@normalized_weights[:coverage] * (1.0 - @coverage.fetch(file)))
+      if file_coverage.nil?
+        (@three_factor_weights[:fan_in] * fan_in_pct.fetch(file)) +
+          (@three_factor_weights[:complexity] * complexity_pct.fetch(file)) +
+          (@three_factor_weights[:churn] * churn_pct.fetch(file))
+      else
+        (@normalized_weights[:fan_in] * fan_in_pct.fetch(file)) +
+          (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
+          (@normalized_weights[:churn] * churn_pct.fetch(file)) +
+          (@normalized_weights[:coverage] * (1.0 - file_coverage))
+      end
     end
 
     def result_row(file, score, fan_in_pct, complexity_pct, churn_pct)
@@ -84,7 +99,7 @@ module StudFinder
         complexity_pct: complexity_pct.fetch(file).round(4),
         churn: @churn.fetch(file, 0).to_i,
         churn_pct: churn_pct.fetch(file).round(4),
-        coverage: coverage_available? ? @coverage.fetch(file).round(4) : nil
+        coverage: coverage_available? ? @coverage.fetch(file)&.round(4) : nil
       }
     end
 
