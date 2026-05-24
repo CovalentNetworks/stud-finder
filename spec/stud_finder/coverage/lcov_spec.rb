@@ -43,7 +43,7 @@ RSpec.describe StudFinder::Coverage::Lcov do
     expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
   end
 
-  it 'maps absent files to nil coverage' do
+  it 'maps absent files to 0.0 coverage' do
     coverage = parse(<<~LCOV)
       SF:app/models/user.rb
       LF:4
@@ -52,7 +52,7 @@ RSpec.describe StudFinder::Coverage::Lcov do
     LCOV
 
     expect(coverage['app/models/user.rb']).to eq(0.75)
-    expect(coverage['app/models/post.rb']).to be_nil
+    expect(coverage['app/models/post.rb']).to eq(0.0)
   end
 
   it 'returns 0.0 when a record has no DA lines' do

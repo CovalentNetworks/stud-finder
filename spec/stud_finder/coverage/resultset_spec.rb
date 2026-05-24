@@ -48,7 +48,7 @@ RSpec.describe StudFinder::Coverage::Resultset do
     expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
   end
 
-  it 'maps files absent from the resultset to nil coverage' do
+  it 'maps files absent from the resultset to 0.0 coverage' do
     coverage = parse_resultset(
       {
         'RSpec' => {
@@ -59,7 +59,7 @@ RSpec.describe StudFinder::Coverage::Resultset do
       }
     )
 
-    expect(coverage['app/models/post.rb']).to be_nil
+    expect(coverage['app/models/post.rb']).to eq(0.0)
   end
 
   it 'max-merges line hits from multiple suites' do

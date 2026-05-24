@@ -72,7 +72,7 @@ RSpec.describe 'fixture repo integration' do
     expect(files['app/services/auth_service.rb']['score']).to be > files['app/services/post_service.rb']['score']
   end
 
-  it 'scores files absent from a partial Cobertura report with the renormalized three-factor formula' do
+  it 'scores files absent from a partial Cobertura report with the four-factor formula' do
     coverage_path = File.join(repo_path, 'coverage/coverage.xml')
     coverage_xml = File.read(coverage_path)
     File.write(coverage_path, coverage_xml.sub(%r{\s*<class filename="app/models/post\.rb" line-rate="0\.95" />}, ''))
@@ -84,8 +84,8 @@ RSpec.describe 'fixture repo integration' do
     expect(payload['meta']['warnings']).to include('coverage_partial')
 
     files = payload['files'].to_h { |file| [file['path'], file] }
-    expect(files['app/models/post.rb']['coverage']).to be_nil
-    expect(files['app/models/post.rb']['score']).to be_within(0.0001).of(0.366)
+    expect(files['app/models/post.rb']['coverage']).to eq(0.0)
+    expect(files['app/models/post.rb']['score']).to be_within(0.0001).of(0.4611)
     expect(files['app/models/profile.rb']['coverage']).to eq(0.75)
     expect(files['app/models/profile.rb']['score']).to be_within(0.0001).of(0.3097)
   end

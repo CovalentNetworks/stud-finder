@@ -18,7 +18,7 @@ module StudFinder
       def call
         reported = parse_report
         @missing_files = @files.reject { |file| reported.key?(file) }
-        @files.to_h { |file| [file, reported.fetch(file, nil)] }
+        @files.to_h { |file| [file, reported.fetch(file, 0.0)] }
       end
 
       private
