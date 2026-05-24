@@ -2,10 +2,13 @@
 
 require 'json'
 require 'optparse'
+require_relative 'churn'
+require_relative 'complexity'
 require_relative 'file_collector'
 require_relative 'version'
 
 module StudFinder
+  # rubocop:disable Metrics/ClassLength
   class CLI
     OUTPUT_FORMATS = %w[table json markdown].freeze
     WEIGHT_KEYS = %i[fan_in complexity churn coverage].freeze
@@ -21,6 +24,8 @@ module StudFinder
       top: nil,
       verbose: false
     }.freeze
+
+    Analysis = Struct.new(:files, :complexity, :churn, :skipped_files, :warnings, keyword_init: true)
 
     class ValidationError < StandardError; end
 
@@ -50,10 +55,11 @@ module StudFinder
         stderr: @stderr
       ).collect
 
-      emit_placeholder(File.expand_path(path), result)
+      analysis = analyze(File.expand_path(path), result.files)
+      emit_results(File.expand_path(path), result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
-           FileCollector::Error => e
+           FileCollector::Error, Churn::Error, Complexity::Error => e
       @stderr.puts e.message
       1
     end
@@ -164,32 +170,93 @@ module StudFinder
       raise ValidationError, format('Error: weights must sum to 1.0; actual sum is %.4f.', active_sum)
     end
 
-    def emit_placeholder(path, result)
+    def analyze(path, files)
+      complexity_result = Complexity.new(repo_path: path, files: files, stderr: @stderr).call
+      analysis_files = files - complexity_result.skipped_files
+      churn_result = Churn.new(
+        repo_path: path,
+        files: analysis_files,
+        days: @options[:churn_days],
+        stderr: @stderr
+      ).call
+      warnings = %w[coverage_unavailable js_not_analyzed]
+      warnings << 'churn_signal_weak' if churn_result.zero_inflated
+
+      Analysis.new(
+        files: analysis_files,
+        complexity: complexity_result.counts,
+        churn: churn_result.counts,
+        skipped_files: complexity_result.skipped_files,
+        warnings: warnings
+      )
+    end
+
+    def emit_results(path, result, analysis)
+      rows = analysis.files.map do |file|
+        {
+          path: file,
+          fan_in: 0,
+          complexity: analysis.complexity.fetch(file, 0),
+          churn: analysis.churn.fetch(file, 0)
+        }
+      end
+      rows = rows.first(@options[:top]) if @options[:top]
+
       case @options[:output]
       when 'json'
-        @stdout.puts JSON.generate(
-          meta: {
-            repo: path,
-            churn_days: @options[:churn_days],
-            file_count: result.files.length,
-            warnings: %w[coverage_unavailable js_not_analyzed],
-            status: 'scoring not yet implemented'
-          },
-          files: []
-        )
+        emit_json(path, result, analysis, rows)
       when 'markdown'
-        @stdout.puts "## stud-finder — #{File.basename(path)}"
-        @stdout.puts
-        @stdout.puts '> JavaScript files not analyzed (Phase 1).'
-        @stdout.puts "> #{result.files.length} Ruby files collected."
-        @stdout.puts
-        @stdout.puts 'scoring not yet implemented'
+        emit_markdown(path, result, analysis, rows)
       else
-        @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, 3-factor score)"
-        @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
-        @stdout.puts "#{result.files.length} Ruby files collected."
-        @stdout.puts 'scoring not yet implemented'
+        emit_table(path, result, analysis, rows)
       end
     end
+
+    def emit_json(path, result, analysis, rows)
+      @stdout.puts JSON.generate(
+        meta: {
+          repo: path,
+          churn_days: @options[:churn_days],
+          file_count: analysis.files.length,
+          collected_file_count: result.files.length,
+          skipped_files: analysis.skipped_files,
+          warnings: analysis.warnings,
+          status: 'scoring not yet implemented; raw signals only'
+        },
+        files: rows
+      )
+    end
+
+    def emit_markdown(path, result, analysis, rows)
+      @stdout.puts "## stud-finder — #{File.basename(path)}"
+      @stdout.puts
+      @stdout.puts '> JavaScript files not analyzed (Phase 1).'
+      @stdout.puts "> #{analysis.files.length} Ruby files analyzed (#{result.files.length} collected)."
+      @stdout.puts
+      @stdout.puts '| path | fan_in | complexity | churn |'
+      @stdout.puts '| --- | ---: | ---: | ---: |'
+      rows.each do |row|
+        @stdout.puts "| #{row[:path]} | #{row[:fan_in]} | #{row[:complexity]} | #{row[:churn]} |"
+      end
+      @stdout.puts
+      @stdout.puts 'scoring not yet implemented; raw signals only'
+    end
+
+    def emit_table(path, result, analysis, rows)
+      @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, 3-factor score)"
+      @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
+      @stdout.puts "#{analysis.files.length} Ruby files analyzed (#{result.files.length} collected)."
+      @stdout.puts 'scoring not yet implemented; raw signals only'
+      @stdout.puts
+      @stdout.puts table_row(path: 'path', fan_in: 'fan_in', complexity: 'complexity', churn: 'churn')
+      @stdout.puts table_row(path: '-' * 60, fan_in: '-' * 7, complexity: '-' * 10, churn: '-' * 7)
+      rows.each { |row| @stdout.puts table_row(**row) }
+    end
+
+    def table_row(path:, fan_in:, complexity:, churn:)
+      format('%<path>-60s %<fan_in>7s %<complexity>10s %<churn>7s',
+             path: path, fan_in: fan_in, complexity: complexity, churn: churn)
+    end
   end
+  # rubocop:enable Metrics/ClassLength
 end

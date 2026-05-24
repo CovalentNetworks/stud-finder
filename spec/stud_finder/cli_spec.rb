@@ -86,15 +86,25 @@ RSpec.describe StudFinder::CLI do
     expect(stderr).to include('does not exist')
   end
 
-  it 'collects files and fails gracefully at the scoring placeholder' do
+  it 'collects files and emits raw signal output before scoring is implemented' do
     make_repo(file_count: 5) do |root|
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: files.to_h { |file| [file, 0] }, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(counts: files.to_h { |file| [file, 0] }, zero_inflated: false, zero_percentage: 0)
+      )
+
       status, stdout, stderr = run_cli([root, '--min-files', '5'])
 
       expect(status).to eq(0)
       expect(stderr).to be_empty
       expect(stdout).to include('Note: JavaScript files not analyzed (Phase 1)')
-      expect(stdout).to include('5 Ruby files collected')
-      expect(stdout).to include('scoring not yet implemented')
+      expect(stdout).to include('5 Ruby files analyzed')
+      expect(stdout).to include('complexity')
+      expect(stdout).to include('churn')
+      expect(stdout).to include('scoring not yet implemented; raw signals only')
     end
   end
 
