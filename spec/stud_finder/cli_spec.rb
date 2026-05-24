@@ -37,6 +37,26 @@ RSpec.describe StudFinder::CLI do
     path
   end
 
+  def write_lcov_report(dir, files)
+    path = File.join(dir, 'lcov.info')
+    File.write(path, files.map do |file|
+      <<~LCOV
+        SF:#{file}
+        LF:2
+        LH:1
+        end_of_record
+      LCOV
+    end.join)
+    path
+  end
+
+  def write_resultset_report(dir, files)
+    path = File.join(dir, 'resultset.json')
+    coverage = files.to_h { |file| [file, { 'lines' => [1, 0] }] }
+    File.write(path, JSON.generate('RSpec' => { 'coverage' => coverage }))
+    path
+  end
+
   it 'prints help' do
     stdout = StringIO.new
     cli = described_class.new(['--help'], stdout: stdout, stderr: StringIO.new)
@@ -70,7 +90,7 @@ RSpec.describe StudFinder::CLI do
     status, _stdout, stderr = run_cli(['--weights', 'fan_in:0.35,complexity:0.25,churn:0.25,coverage:0.15'])
 
     expect(status).to eq(1)
-    expect(stderr).to include('coverage weight must be 0.0 in Phase 1')
+    expect(stderr).to include('coverage weight must be 0.0 when no coverage data is provided')
   end
 
   it 'requires all weight keys' do
@@ -110,6 +130,42 @@ RSpec.describe StudFinder::CLI do
       expect(status).to eq(0)
       expect(stderr).not_to include('coverage weight must be 0.0')
       expect(JSON.parse(stdout).dig('meta', 'formula')).to eq('4-factor')
+    end
+  end
+
+  it 'detects and uses LCOV reports from --coverage' do
+    make_repo(file_count: 5) do |root|
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      coverage = write_lcov_report(root, files)
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: files.to_h { |file| [file, 0] }, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(counts: files.to_h { |file| [file, 0] }, zero_inflated: false, zero_percentage: 0)
+      )
+
+      status, stdout, stderr = run_cli([root, '--min-files', '5', '--coverage', coverage, '--output', 'json'])
+
+      expect(status).to eq(0), stderr
+      expect(JSON.parse(stdout).fetch('files').map { |file| file['coverage'] }.uniq).to eq([0.5])
+    end
+  end
+
+  it 'detects and uses SimpleCov resultset reports from --coverage' do
+    make_repo(file_count: 5) do |root|
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      coverage = write_resultset_report(root, files)
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: files.to_h { |file| [file, 0] }, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(counts: files.to_h { |file| [file, 0] }, zero_inflated: false, zero_percentage: 0)
+      )
+
+      status, stdout, stderr = run_cli([root, '--min-files', '5', '--coverage', coverage, '--output', 'json'])
+
+      expect(status).to eq(0), stderr
+      expect(JSON.parse(stdout).fetch('files').map { |file| file['coverage'] }.uniq).to eq([0.5])
     end
   end
 
