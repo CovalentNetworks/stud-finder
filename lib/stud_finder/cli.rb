@@ -6,7 +6,7 @@ require 'optparse'
 require 'time'
 require_relative 'churn'
 require_relative 'complexity'
-require_relative 'coverage/cobertura'
+require_relative 'coverage/detector'
 require_relative 'fan_in'
 require_relative 'file_collector'
 require_relative 'scorer'
@@ -67,8 +67,8 @@ module StudFinder
       emit_results(File.expand_path(path), result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
-           FileCollector::Error, Churn::Error, Complexity::Error, Coverage::Cobertura::Error,
-           Scorer::ValidationError => e
+           FileCollector::Error, Churn::Error, Complexity::Error, Coverage::Cobertura::Error, Coverage::Detector::Error,
+           Coverage::Lcov::Error, Coverage::Resultset::Error, Scorer::ValidationError => e
       @stderr.puts e.message
       1
     end
@@ -93,7 +93,7 @@ module StudFinder
           @options[:weights] = parse_weights(value)
           @options[:custom_weights] = true
         end
-        opts.on('--coverage PATH', 'Path to a Cobertura XML coverage report') do |value|
+        opts.on('--coverage PATH', 'Path to a coverage report (.xml, .info, .json)') do |value|
           @options[:coverage_path] = value
         end
         opts.on('--trunk-threshold N', Integer,
@@ -183,7 +183,7 @@ module StudFinder
     def validate_weights!
       weights = @options[:weights]
       if weights[:coverage].positive? && !coverage_available?
-        raise ValidationError, 'Error: coverage weight must be 0.0 in Phase 1 (no coverage data available).'
+        raise ValidationError, 'Error: coverage weight must be 0.0 when no coverage data is provided.'
       end
 
       active_sum = weights.values.sum
@@ -214,7 +214,7 @@ module StudFinder
       coverage_parser = nil
       coverage_result = nil
       if coverage_available?
-        coverage_parser = Coverage::Cobertura.new(path: @options[:coverage_path], files: analysis_files)
+        coverage_parser = Coverage::Detector.for(path: @options[:coverage_path], files: analysis_files)
         coverage_result = coverage_parser.call
       end
 
