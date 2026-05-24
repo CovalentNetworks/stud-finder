@@ -78,18 +78,25 @@ end
 " : 'export const value = 1;')
       end
       write_file(root, '__tests__/ignored.js', 'import x from "../app/javascript/a";')
+      write_file(root, 'src/__tests__/foo.tsx', 'export const Foo = () => null;')
       write_file(root, 'app/javascript/a.test.js', '')
       write_file(root, 'app/javascript/b.test.ts', '')
+      write_file(root, 'app/javascript/b.test.jsx', '')
+      write_file(root, 'app/javascript/c.test.tsx', '')
       write_file(root, 'app/javascript/c.spec.js', '')
+      write_file(root, 'app/javascript/c.spec.jsx', '')
       write_file(root, 'app/javascript/d.spec.ts', '')
+      write_file(root, 'app/javascript/d.spec.tsx', '')
 
       result = collect(root)
 
       expect(result.files).to include('app/javascript/a.js', 'app/javascript/b.jsx', 'app/javascript/c.ts',
                                       'app/javascript/d.tsx')
       expect(result.files).not_to include(
-        '__tests__/ignored.js', 'app/javascript/a.test.js', 'app/javascript/b.test.ts',
-        'app/javascript/c.spec.js', 'app/javascript/d.spec.ts'
+        '__tests__/ignored.js', 'src/__tests__/foo.tsx', 'app/javascript/a.test.js',
+        'app/javascript/b.test.ts', 'app/javascript/b.test.jsx', 'app/javascript/c.test.tsx',
+        'app/javascript/c.spec.js', 'app/javascript/c.spec.jsx', 'app/javascript/d.spec.ts',
+        'app/javascript/d.spec.tsx'
       )
       expect(result.languages).to include(
         'app/models/user.rb' => :ruby,
@@ -98,7 +105,7 @@ end
         'app/javascript/c.ts' => :typescript,
         'app/javascript/d.tsx' => :typescript
       )
-      expect(result.default_excluded_count).to eq(5)
+      expect(result.default_excluded_count).to eq(10)
     end
   end
 

@@ -16,10 +16,15 @@ module StudFinder
       'spec/**',
       'test/**',
       '__tests__/**',
+      '**/__tests__/**',
       '**/*.test.js',
       '**/*.test.ts',
+      '**/*.test.jsx',
+      '**/*.test.tsx',
       '**/*.spec.js',
-      '**/*.spec.ts'
+      '**/*.spec.ts',
+      '**/*.spec.jsx',
+      '**/*.spec.tsx'
     ].freeze
 
     EXTENSIONS = %w[.rb .js .ts .jsx .tsx].freeze
