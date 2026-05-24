@@ -2,10 +2,12 @@
 
 require 'json'
 require 'optparse'
+require 'time'
 require_relative 'churn'
 require_relative 'complexity'
 require_relative 'fan_in'
 require_relative 'file_collector'
+require_relative 'scorer'
 require_relative 'version'
 
 module StudFinder
@@ -26,7 +28,8 @@ module StudFinder
       verbose: false
     }.freeze
 
-    Analysis = Struct.new(:files, :fan_in, :complexity, :churn, :skipped_files, :warnings, keyword_init: true)
+    Analysis = Struct.new(:files, :fan_in, :complexity, :churn, :skipped_files, :warnings, :rows, :weights,
+                          keyword_init: true)
 
     class ValidationError < StandardError; end
 
@@ -60,7 +63,7 @@ module StudFinder
       emit_results(File.expand_path(path), result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
-           FileCollector::Error, Churn::Error, Complexity::Error => e
+           FileCollector::Error, Churn::Error, Complexity::Error, Scorer::ValidationError => e
       @stderr.puts e.message
       1
     end
@@ -181,8 +184,23 @@ module StudFinder
         days: @options[:churn_days],
         stderr: @stderr
       ).call
-      warnings = %w[coverage_unavailable js_not_analyzed dynamic_constant_references_not_detected]
+
+      scorer = Scorer.new(
+        files: analysis_files,
+        fan_in: fan_in_result.counts,
+        complexity: complexity_result.counts,
+        churn: churn_result.counts,
+        weights: @options[:weights],
+        branch_threshold: @options[:branch_threshold],
+        trunk_threshold: @options[:trunk_threshold]
+      )
+
+      warnings = %w[coverage_unavailable js_not_analyzed]
       warnings << 'zero_churn_majority' if churn_result.zero_inflated
+      warnings << 'files_skipped' if complexity_result.skipped_files.any?
+      warnings << 'small_repo' if analysis_files.length < @options[:min_files]
+
+      @stderr.puts renormalization_note(weights: scorer.normalized_weights, stderr: true)
 
       Analysis.new(
         files: analysis_files,
@@ -190,77 +208,127 @@ module StudFinder
         complexity: complexity_result.counts,
         churn: churn_result.counts,
         skipped_files: complexity_result.skipped_files,
-        warnings: warnings
+        warnings: warnings,
+        rows: scorer.call,
+        weights: scorer.normalized_weights
       )
     end
 
     def emit_results(path, result, analysis)
-      rows = analysis.files.map do |file|
-        {
-          path: file,
-          fan_in: analysis.fan_in.fetch(file, 0),
-          complexity: analysis.complexity.fetch(file, 0),
-          churn: analysis.churn.fetch(file, 0)
-        }
-      end
+      rows = analysis.rows
       rows = rows.first(@options[:top]) if @options[:top]
 
       case @options[:output]
       when 'json'
-        emit_json(path, result, analysis, rows)
+        emit_json(path, analysis, rows)
       when 'markdown'
-        emit_markdown(path, result, analysis, rows)
+        emit_markdown(analysis, rows)
       else
         emit_table(path, result, analysis, rows)
       end
     end
 
-    def emit_json(path, result, analysis, rows)
+    def emit_json(path, analysis, rows)
       @stdout.puts JSON.generate(
         meta: {
           repo: path,
+          analyzed_at: Time.now.utc.iso8601,
           churn_days: @options[:churn_days],
           file_count: analysis.files.length,
-          collected_file_count: result.files.length,
-          skipped_files: analysis.skipped_files,
-          warnings: analysis.warnings,
-          status: 'scoring not yet implemented; raw signals only'
+          files_skipped: analysis.skipped_files.length,
+          formula: '3-factor (no coverage)',
+          weights: json_weights(analysis.weights),
+          warnings: analysis.warnings
         },
-        files: rows
+        files: rows.map { |row| json_file(row) }
       )
     end
 
-    def emit_markdown(path, result, analysis, rows)
-      @stdout.puts "## stud-finder — #{File.basename(path)}"
+    def emit_markdown(analysis, rows)
+      @stdout.puts "## stud-finder — #{Time.now.utc.strftime('%Y-%m-%d')}"
       @stdout.puts
+      @stdout.puts "> 3-factor score (no coverage). Churn window: #{@options[:churn_days]} days. " \
+                   "#{analysis.files.length} files analyzed."
       @stdout.puts '> JavaScript files not analyzed (Phase 1).'
-      @stdout.puts '> Dynamic constant references are not detected; fan_in may be undercounted.'
-      @stdout.puts "> #{analysis.files.length} Ruby files analyzed (#{result.files.length} collected)."
       @stdout.puts
-      @stdout.puts '| path | fan_in | complexity | churn |'
-      @stdout.puts '| --- | ---: | ---: | ---: |'
+      @stdout.puts '| rank | file | score | class | fan_in | complexity | churn |'
+      @stdout.puts '|------|------|-------|-------|--------|------------|-------|'
       rows.each do |row|
-        @stdout.puts "| #{row[:path]} | #{row[:fan_in]} | #{row[:complexity]} | #{row[:churn]} |"
+        @stdout.puts "| #{row[:rank]} | #{row[:path]} | #{format_score(row[:score])} | #{row[:classification]} | " \
+                     "#{row[:fan_in]} | #{row[:complexity]} | #{row[:churn]} |"
       end
       @stdout.puts
-      @stdout.puts 'scoring not yet implemented; raw signals only'
+      @stdout.puts '*fan_in is a static approximation — dynamic references not counted.*'
     end
 
     def emit_table(path, result, analysis, rows)
       @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, 3-factor score)"
+      @stdout.puts renormalization_note(weights: analysis.weights, stderr: false)
       @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
-      @stdout.puts 'Note: Dynamic constant references are not detected; fan_in may be undercounted.'
-      @stdout.puts "#{analysis.files.length} Ruby files analyzed (#{result.files.length} collected)."
-      @stdout.puts 'scoring not yet implemented; raw signals only'
       @stdout.puts
-      @stdout.puts table_row(path: 'path', fan_in: 'fan_in', complexity: 'complexity', churn: 'churn')
-      @stdout.puts table_row(path: '-' * 60, fan_in: '-' * 7, complexity: '-' * 10, churn: '-' * 7)
-      rows.each { |row| @stdout.puts table_row(**row) }
+      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  churn'
+      rows.each do |row|
+        @stdout.puts table_row(row)
+      end
+      @stdout.puts
+      @stdout.puts footer(result, analysis)
+      @stdout.puts 'fan_in is a static approximation — dynamic references (const_get, send, metaprogramming) ' \
+                   'not counted.'
     end
 
-    def table_row(path:, fan_in:, complexity:, churn:)
-      format('%<path>-60s %<fan_in>7s %<complexity>10s %<churn>7s',
-             path: path, fan_in: fan_in, complexity: complexity, churn: churn)
+    def json_file(row)
+      {
+        rank: row[:rank],
+        path: row[:path],
+        score: row[:score],
+        class: row[:classification],
+        fan_in: row[:fan_in],
+        fan_in_pct: row[:fan_in_pct],
+        complexity: row[:complexity],
+        complexity_pct: row[:complexity_pct],
+        churn: row[:churn],
+        churn_pct: row[:churn_pct],
+        coverage: nil
+      }
+    end
+
+    def json_weights(weights)
+      {
+        fan_in: weights[:fan_in].round(4),
+        complexity: weights[:complexity].round(4),
+        churn: weights[:churn].round(4),
+        coverage: nil
+      }
+    end
+
+    def renormalization_note(weights:, stderr:)
+      if stderr
+        format('Note: coverage data not available. Score uses 3-factor formula (fan_in %<fan_in>.2f, ' \
+               'complexity %<complexity>.2f, churn %<churn>.2f).', **weights)
+      else
+        format('Note: coverage data not available. Score uses fan_in %<fan_in>.2f, complexity %<complexity>.2f, ' \
+               'churn %<churn>.2f.', **weights)
+      end
+    end
+
+    def footer(result, analysis)
+      parts = ["#{analysis.files.length} files analyzed."]
+      if analysis.skipped_files.any?
+        parts << "#{analysis.skipped_files.length} files skipped (parse errors — run --verbose to see)."
+      end
+      parts << "#{result.default_excluded_count} files excluded by default rules."
+      parts.join(' ')
+    end
+
+    def format_score(score)
+      format('%.4f', score)
+    end
+
+    def table_row(row)
+      format('%<rank>5d  %<path>-45s  %<score>6s  %<classification>-6s  %<fan_in>6d  %<complexity>10d  %<churn>5d',
+             rank: row[:rank], path: row[:path], score: format_score(row[:score]),
+             classification: row[:classification], fan_in: row[:fan_in], complexity: row[:complexity],
+             churn: row[:churn])
     end
   end
   # rubocop:enable Metrics/ClassLength
