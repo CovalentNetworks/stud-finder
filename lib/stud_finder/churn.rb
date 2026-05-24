@@ -4,7 +4,7 @@ require 'open3'
 
 module StudFinder
   class Churn
-    Result = Struct.new(:counts, :zero_inflated, :zero_percentage, keyword_init: true)
+    Result = Struct.new(:counts, :line_counts, :zero_inflated, :zero_percentage, keyword_init: true)
 
     class Error < StandardError; end
 
@@ -21,15 +21,24 @@ module StudFinder
 
       counts = initial_counts
       file_set = counts.keys.to_h { |file| [file, true] }
-      stdout.split("\0").each do |path|
-        next if path.empty?
+      line_counts = initial_counts
+      stdout.each_line do |line|
+        line = line.strip
+        next if line.empty?
+
+        added, deleted, path = line.split("\t", 3)
+        next if added == '-' || path.nil?
 
         relative = normalize_path(path)
-        counts[relative] += 1 if file_set[relative]
+        next unless file_set[relative]
+
+        counts[relative] += 1
+        line_counts[relative] += added.to_i + deleted.to_i
       end
 
       Result.new(
         counts: counts,
+        line_counts: line_counts,
         zero_inflated: zero_inflated?(counts),
         zero_percentage: zero_percentage(counts)
       ).tap { |result| warn_if_zero_inflated(result) }
@@ -44,9 +53,9 @@ module StudFinder
         'git', '-C', @repo_path, 'log',
         "--since=#{@days} days ago",
         '--format=tformat:',
-        '-z',
-        '--diff-filter=ACDMR',
-        '--name-only'
+        '--numstat',
+        '--no-merges',
+        '--diff-filter=ACDMR'
       )
     end
 

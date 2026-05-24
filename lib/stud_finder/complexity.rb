@@ -73,7 +73,7 @@ module StudFinder
           next
         end
 
-        counts[relative] = offenses.sum { |offense| complexity_score(offense) }
+        counts[relative] = offenses.map { |offense| complexity_score(offense) }.max || 0
       end
 
       Result.new(counts: counts, skipped_files: skipped)

@@ -19,7 +19,7 @@ module StudFinder
     WEIGHT_KEYS = %i[fan_in complexity churn coverage].freeze
     DEFAULT_OPTIONS = {
       output: 'table',
-      churn_days: 90,
+      churn_days: 180,
       weights: { fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15 },
       custom_weights: false,
       trunk_threshold: 85,
@@ -86,7 +86,7 @@ module StudFinder
                 'Output format: table, json, markdown, csv (default: table)') do |value|
           @options[:output] = value
         end
-        opts.on('--churn-days N', Integer, 'Commit lookback window in days (default: 90)') do |value|
+        opts.on('--churn-days N', Integer, 'Commit lookback window in days (default: 180)') do |value|
           @options[:churn_days] = value
         end
         opts.on('--weights WEIGHTS', 'fan_in:F,complexity:C,churn:H,coverage:V') do |value|
@@ -223,6 +223,7 @@ module StudFinder
         fan_in: fan_in_result.counts,
         complexity: complexity_result.counts,
         churn: churn_result.counts,
+        churn_lines: churn_result.line_counts,
         coverage: coverage_result,
         weights: @options[:weights],
         branch_threshold: @options[:branch_threshold],

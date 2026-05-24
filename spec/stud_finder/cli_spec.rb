@@ -66,6 +66,8 @@ RSpec.describe StudFinder::CLI do
     end
     expect(stdout.string).to include('Usage: stud-finder [PATH] [OPTIONS]')
     expect(stdout.string).to include('--weights')
+    expect(stdout.string).to include('--churn-days N')
+    expect(stdout.string).to include('default: 180')
     expect(stdout.string).to include('--coverage')
   end
 

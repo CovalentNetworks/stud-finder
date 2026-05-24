@@ -11,12 +11,13 @@ module StudFinder
     attr_reader :normalized_weights
 
     # rubocop:disable Metrics/ParameterLists
-    def initialize(files:, fan_in:, complexity:, churn:, coverage: nil, weights: DEFAULT_WEIGHTS, branch_threshold: 50,
-                   trunk_threshold: 85)
+    def initialize(files:, fan_in:, complexity:, churn:, churn_lines: nil, coverage: nil, weights: DEFAULT_WEIGHTS,
+                   branch_threshold: 50, trunk_threshold: 85)
       @files = files
       @fan_in = fan_in
       @complexity = complexity
       @churn = churn
+      @churn_lines = churn_lines || churn
       @coverage = coverage
       @weights = weights
       @branch_threshold = branch_threshold
@@ -29,7 +30,7 @@ module StudFinder
     def call
       fan_in_pct = Normalizer.percentile_rank(@fan_in, @files)
       complexity_pct = Normalizer.percentile_rank(@complexity, @files)
-      churn_pct = Normalizer.percentile_rank(@churn, @files)
+      churn_pct = composite_churn_pct
 
       rows = @files.each_with_index.map do |file, index|
         score = weighted_score(file, fan_in_pct, complexity_pct, churn_pct)
@@ -85,6 +86,15 @@ module StudFinder
           (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
           (@normalized_weights[:churn] * churn_pct.fetch(file)) +
           (@normalized_weights[:coverage] * (1.0 - file_coverage))
+      end
+    end
+
+    def composite_churn_pct
+      count_pct = Normalizer.percentile_rank(@churn, @files)
+      line_pct = Normalizer.percentile_rank(@churn_lines, @files)
+
+      @files.to_h do |file|
+        [file, (0.5 * count_pct.fetch(file)) + (0.5 * line_pct.fetch(file))]
       end
     end
 
