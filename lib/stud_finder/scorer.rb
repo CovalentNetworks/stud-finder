@@ -75,18 +75,19 @@ module StudFinder
     end
 
     def weighted_score(file, fan_in_pct, complexity_pct, churn_pct)
-      file_coverage = @coverage.fetch(file, nil) if coverage_available?
+      return three_factor_score(file, fan_in_pct, complexity_pct, churn_pct) unless coverage_available?
 
-      if file_coverage.nil?
-        (@three_factor_weights[:fan_in] * fan_in_pct.fetch(file)) +
-          (@three_factor_weights[:complexity] * complexity_pct.fetch(file)) +
-          (@three_factor_weights[:churn] * churn_pct.fetch(file))
-      else
-        (@normalized_weights[:fan_in] * fan_in_pct.fetch(file)) +
-          (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
-          (@normalized_weights[:churn] * churn_pct.fetch(file)) +
-          (@normalized_weights[:coverage] * (1.0 - file_coverage))
-      end
+      file_coverage = @coverage.fetch(file, 0.0)
+      (@normalized_weights[:fan_in] * fan_in_pct.fetch(file)) +
+        (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
+        (@normalized_weights[:churn] * churn_pct.fetch(file)) +
+        (@normalized_weights[:coverage] * (1.0 - file_coverage))
+    end
+
+    def three_factor_score(file, fan_in_pct, complexity_pct, churn_pct)
+      (@three_factor_weights[:fan_in] * fan_in_pct.fetch(file)) +
+        (@three_factor_weights[:complexity] * complexity_pct.fetch(file)) +
+        (@three_factor_weights[:churn] * churn_pct.fetch(file))
     end
 
     def composite_churn_pct
@@ -110,7 +111,7 @@ module StudFinder
         churn_commits: @churn.fetch(file, 0).to_i,
         churn_lines: @churn_lines.fetch(file, 0).to_i,
         churn_pct: churn_pct.fetch(file).round(4),
-        coverage: coverage_available? ? @coverage.fetch(file)&.round(4) : nil
+        coverage: coverage_available? ? @coverage.fetch(file, 0.0).round(4) : nil
       }
     end
 
