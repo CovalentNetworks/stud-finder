@@ -107,7 +107,8 @@ module StudFinder
         fan_in_pct: fan_in_pct.fetch(file).round(4),
         complexity: @complexity.fetch(file, 0).to_i,
         complexity_pct: complexity_pct.fetch(file).round(4),
-        churn: @churn.fetch(file, 0).to_i,
+        churn_commits: @churn.fetch(file, 0).to_i,
+        churn_lines: @churn_lines.fetch(file, 0).to_i,
         churn_pct: churn_pct.fetch(file).round(4),
         coverage: coverage_available? ? @coverage.fetch(file)&.round(4) : nil
       }

@@ -16,6 +16,10 @@ module StudFinder
   # rubocop:disable Metrics/ClassLength
   class CLI
     OUTPUT_FORMATS = %w[table json markdown csv].freeze
+    RESULT_COLUMNS = %w[
+      rank file score class fan_in fan_in_pct complexity complexity_pct churn_commits churn_lines churn_pct coverage
+    ].freeze
+    MARKDOWN_COLUMNS = %w[rank file score class fan_in complexity churn_commits churn_lines churn_pct coverage].freeze
     WEIGHT_KEYS = %i[fan_in complexity churn coverage].freeze
     DEFAULT_OPTIONS = {
       output: 'table',
@@ -31,8 +35,8 @@ module StudFinder
       coverage_path: nil
     }.freeze
 
-    Analysis = Struct.new(:files, :fan_in, :complexity, :churn, :coverage, :coverage_available, :skipped_files,
-                          :warnings, :rows, :weights, keyword_init: true)
+    Analysis = Struct.new(:files, :fan_in, :complexity, :churn_commits, :churn_lines, :coverage, :coverage_available,
+                          :skipped_files, :warnings, :rows, :weights, keyword_init: true)
 
     class ValidationError < StandardError; end
 
@@ -246,7 +250,8 @@ module StudFinder
         files: analysis_files,
         fan_in: fan_in_result.counts,
         complexity: complexity_result.counts,
-        churn: churn_result.counts,
+        churn_commits: churn_result.churn_commits,
+        churn_lines: churn_result.churn_lines,
         coverage: coverage_result,
         coverage_available: coverage_available?,
         skipped_files: complexity_result.skipped_files,
@@ -276,9 +281,7 @@ module StudFinder
     end
 
     def emit_csv(rows)
-      @stdout << CSV.generate_line(
-        %w[rank file score class fan_in fan_in_pct complexity complexity_pct churn churn_pct coverage]
-      )
+      @stdout << CSV.generate_line(RESULT_COLUMNS)
       rows.each do |row|
         @stdout << CSV.generate_line(csv_file(row))
       end
@@ -307,14 +310,21 @@ module StudFinder
                    "Churn window: #{@options[:churn_days]} days. #{analysis.files.length} files analyzed."
       @stdout.puts '> JavaScript files not analyzed (Phase 1).'
       @stdout.puts
-      @stdout.puts '| rank | file | score | class | fan_in | complexity | churn | coverage |'
-      @stdout.puts '|------|------|-------|-------|--------|------------|-------|----------|'
+      @stdout.puts "| #{MARKDOWN_COLUMNS.join(' | ')} |"
+      @stdout.puts "| #{MARKDOWN_COLUMNS.map { '---' }.join(' | ')} |"
       rows.each do |row|
-        @stdout.puts "| #{row[:rank]} | #{row[:path]} | #{format_score(row[:score])} | #{row[:classification]} | " \
-                     "#{row[:fan_in]} | #{row[:complexity]} | #{row[:churn]} | #{format_coverage(row[:coverage])} |"
+        @stdout.puts markdown_row(row)
       end
       @stdout.puts
       @stdout.puts '*fan_in is a static approximation — dynamic references not counted.*'
+    end
+
+    def markdown_row(row)
+      values = [
+        row[:rank], row[:path], format_score(row[:score]), row[:classification], row[:fan_in], row[:complexity],
+        row[:churn_commits], row[:churn_lines], format_score(row[:churn_pct]), format_coverage(row[:coverage])
+      ]
+      "| #{values.join(' | ')} |"
     end
 
     def emit_table(path, result, analysis, rows)
@@ -323,8 +333,8 @@ module StudFinder
       @stdout.puts scoring_note(weights: analysis.weights, stderr: false) unless analysis.coverage_available
       @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
       @stdout.puts
-      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  churn  ' \
-                   'coverage'
+      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  ' \
+                   'churn_commits  churn_lines  churn_pct  coverage'
       rows.each do |row|
         @stdout.puts table_row(row)
       end
@@ -344,7 +354,8 @@ module StudFinder
         fan_in_pct: row[:fan_in_pct],
         complexity: row[:complexity],
         complexity_pct: row[:complexity_pct],
-        churn: row[:churn],
+        churn_commits: row[:churn_commits],
+        churn_lines: row[:churn_lines],
         churn_pct: row[:churn_pct],
         coverage: row[:coverage]
       }
@@ -360,7 +371,8 @@ module StudFinder
         format_score(row[:fan_in_pct]),
         row[:complexity],
         format_score(row[:complexity_pct]),
-        row[:churn],
+        row[:churn_commits],
+        row[:churn_lines],
         format_score(row[:churn_pct]),
         row[:coverage] || ''
       ]
@@ -410,10 +422,11 @@ module StudFinder
 
     def table_row(row)
       format('%<rank>5d  %<path>-45s  %<score>6s  %<classification>-6s  %<fan_in>6d  %<complexity>10d  ' \
-             '%<churn>5d  %<coverage>8s',
+             '%<churn_commits>13d  %<churn_lines>11d  %<churn_pct>9s  %<coverage>8s',
              rank: row[:rank], path: row[:path], score: format_score(row[:score]),
              classification: row[:classification], fan_in: row[:fan_in], complexity: row[:complexity],
-             churn: row[:churn], coverage: format_coverage(row[:coverage]))
+             churn_commits: row[:churn_commits], churn_lines: row[:churn_lines],
+             churn_pct: format_score(row[:churn_pct]), coverage: format_coverage(row[:coverage]))
     end
   end
   # rubocop:enable Metrics/ClassLength
