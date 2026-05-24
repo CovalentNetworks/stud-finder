@@ -4,6 +4,7 @@ require 'json'
 require 'optparse'
 require_relative 'churn'
 require_relative 'complexity'
+require_relative 'fan_in'
 require_relative 'file_collector'
 require_relative 'version'
 
@@ -25,7 +26,7 @@ module StudFinder
       verbose: false
     }.freeze
 
-    Analysis = Struct.new(:files, :complexity, :churn, :skipped_files, :warnings, keyword_init: true)
+    Analysis = Struct.new(:files, :fan_in, :complexity, :churn, :skipped_files, :warnings, keyword_init: true)
 
     class ValidationError < StandardError; end
 
@@ -173,17 +174,19 @@ module StudFinder
     def analyze(path, files)
       complexity_result = Complexity.new(repo_path: path, files: files, stderr: @stderr).call
       analysis_files = files - complexity_result.skipped_files
+      fan_in_result = FanIn.new(repo_path: path, files: analysis_files).call
       churn_result = Churn.new(
         repo_path: path,
         files: analysis_files,
         days: @options[:churn_days],
         stderr: @stderr
       ).call
-      warnings = %w[coverage_unavailable js_not_analyzed]
+      warnings = %w[coverage_unavailable js_not_analyzed dynamic_constant_references_not_detected]
       warnings << 'zero_churn_majority' if churn_result.zero_inflated
 
       Analysis.new(
         files: analysis_files,
+        fan_in: fan_in_result.counts,
         complexity: complexity_result.counts,
         churn: churn_result.counts,
         skipped_files: complexity_result.skipped_files,
@@ -195,7 +198,7 @@ module StudFinder
       rows = analysis.files.map do |file|
         {
           path: file,
-          fan_in: 0,
+          fan_in: analysis.fan_in.fetch(file, 0),
           complexity: analysis.complexity.fetch(file, 0),
           churn: analysis.churn.fetch(file, 0)
         }
@@ -231,6 +234,7 @@ module StudFinder
       @stdout.puts "## stud-finder — #{File.basename(path)}"
       @stdout.puts
       @stdout.puts '> JavaScript files not analyzed (Phase 1).'
+      @stdout.puts '> Dynamic constant references are not detected; fan_in may be undercounted.'
       @stdout.puts "> #{analysis.files.length} Ruby files analyzed (#{result.files.length} collected)."
       @stdout.puts
       @stdout.puts '| path | fan_in | complexity | churn |'
@@ -245,6 +249,7 @@ module StudFinder
     def emit_table(path, result, analysis, rows)
       @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, 3-factor score)"
       @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
+      @stdout.puts 'Note: Dynamic constant references are not detected; fan_in may be undercounted.'
       @stdout.puts "#{analysis.files.length} Ruby files analyzed (#{result.files.length} collected)."
       @stdout.puts 'scoring not yet implemented; raw signals only'
       @stdout.puts
