@@ -11,12 +11,13 @@ module StudFinder
     attr_reader :normalized_weights
 
     # rubocop:disable Metrics/ParameterLists
-    def initialize(files:, fan_in:, complexity:, churn:, weights: DEFAULT_WEIGHTS, branch_threshold: 50,
+    def initialize(files:, fan_in:, complexity:, churn:, coverage: nil, weights: DEFAULT_WEIGHTS, branch_threshold: 50,
                    trunk_threshold: 85)
       @files = files
       @fan_in = fan_in
       @complexity = complexity
       @churn = churn
+      @coverage = coverage
       @weights = weights
       @branch_threshold = branch_threshold
       @trunk_threshold = trunk_threshold
@@ -50,6 +51,8 @@ module StudFinder
     end
 
     def normalize_weights
+      return @weights if coverage_available?
+
       active_total = @weights.fetch(:fan_in, 0.0) + @weights.fetch(:complexity, 0.0) + @weights.fetch(:churn, 0.0)
       raise ValidationError, 'Error: active weights must be greater than 0.0.' if active_total <= 0.0
 
@@ -62,9 +65,12 @@ module StudFinder
     end
 
     def weighted_score(file, fan_in_pct, complexity_pct, churn_pct)
-      (@normalized_weights[:fan_in] * fan_in_pct.fetch(file)) +
-        (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
-        (@normalized_weights[:churn] * churn_pct.fetch(file))
+      score = (@normalized_weights[:fan_in] * fan_in_pct.fetch(file)) +
+              (@normalized_weights[:complexity] * complexity_pct.fetch(file)) +
+              (@normalized_weights[:churn] * churn_pct.fetch(file))
+      return score unless coverage_available?
+
+      score + (@normalized_weights[:coverage] * (1.0 - @coverage.fetch(file)))
     end
 
     def result_row(file, score, fan_in_pct, complexity_pct, churn_pct)
@@ -78,8 +84,12 @@ module StudFinder
         complexity_pct: complexity_pct.fetch(file).round(4),
         churn: @churn.fetch(file, 0).to_i,
         churn_pct: churn_pct.fetch(file).round(4),
-        coverage: nil
+        coverage: coverage_available? ? @coverage.fetch(file).round(4) : nil
       }
+    end
+
+    def coverage_available?
+      !@coverage.nil?
     end
 
     def classification(fan_in_pct)

@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
   spec.executables = ['stud-finder']
   spec.require_paths = ['lib']
 
+  spec.add_dependency 'rexml'
   spec.add_dependency 'rubocop', '>= 1.0'
   spec.add_dependency 'rubocop-ast', '>= 1.0'
 

@@ -24,6 +24,19 @@ RSpec.describe StudFinder::CLI do
     end
   end
 
+  def write_coverage_report(dir, files)
+    path = File.join(dir, 'coverage.xml')
+    classes = files.map do |file|
+      %(<class filename="#{file}" line-rate="0.5" />)
+    end.join("\n")
+    File.write(path, <<~XML)
+      <coverage><packages><package><classes>
+      #{classes}
+      </classes></package></packages></coverage>
+    XML
+    path
+  end
+
   it 'prints help' do
     stdout = StringIO.new
     cli = described_class.new(['--help'], stdout: stdout, stderr: StringIO.new)
@@ -33,6 +46,7 @@ RSpec.describe StudFinder::CLI do
     end
     expect(stdout.string).to include('Usage: stud-finder [PATH] [OPTIONS]')
     expect(stdout.string).to include('--weights')
+    expect(stdout.string).to include('--coverage')
   end
 
   it 'prints version' do
@@ -64,6 +78,39 @@ RSpec.describe StudFinder::CLI do
 
     expect(status).to eq(1)
     expect(stderr).to include('weights must include fan_in, complexity, churn, and coverage')
+  end
+
+  it 'reports a missing coverage file' do
+    path = File.join(Dir.tmpdir, "stud-finder-coverage-nope-#{rand(100_000)}.xml")
+    status, _stdout, stderr = run_cli(['--coverage', path])
+
+    expect(status).to eq(1)
+    expect(stderr).to include("Error: coverage file not found: #{path}")
+  end
+
+  it 'accepts a non-zero coverage weight when coverage is provided' do
+    make_repo(file_count: 5) do |root|
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      coverage = write_coverage_report(root, files)
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: files.to_h { |file| [file, 0] }, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(counts: files.to_h { |file| [file, 0] }, zero_inflated: false, zero_percentage: 0)
+      )
+
+      status, stdout, stderr = run_cli([
+                                         root,
+                                         '--min-files', '5',
+                                         '--weights', 'fan_in:0.35,complexity:0.25,churn:0.25,coverage:0.15',
+                                         '--coverage', coverage,
+                                         '--output', 'json'
+                                       ])
+
+      expect(status).to eq(0)
+      expect(stderr).not_to include('coverage weight must be 0.0')
+      expect(JSON.parse(stdout).dig('meta', 'formula')).to eq('4-factor')
+    end
   end
 
   it 'validates threshold ranges' do
@@ -154,6 +201,39 @@ RSpec.describe StudFinder::CLI do
 
       expect(status).to eq(1)
       expect(stderr).to include('Too few for meaningful analysis')
+    end
+  end
+  it 'rejects --coverage with a non-existent file' do
+    missing = File.join(Dir.tmpdir, "stud-finder-coverage-nope-#{rand(100_000)}.xml")
+    status, _stdout, stderr = run_cli(['--coverage', missing])
+
+    expect(status).to eq(1)
+    expect(stderr).to include("Error: coverage file not found: #{missing}")
+  end
+
+  it 'accepts positive coverage weight when --coverage is provided' do
+    make_repo(file_count: 5) do |root|
+      coverage_path = File.join(root, 'coverage.xml')
+      files = Array.new(5) { |i| "app/models/model_#{i}.rb" }
+      File.write(coverage_path, <<~XML)
+        <coverage><packages><package><classes>
+          #{files.map { |file| %(<class filename="#{file}" line-rate="0.5" />) }.join}
+        </classes></package></packages></coverage>
+      XML
+      allow_any_instance_of(StudFinder::Complexity).to receive(:call).and_return(
+        StudFinder::Complexity::Result.new(counts: files.to_h { |file| [file, 0] }, skipped_files: [])
+      )
+      allow_any_instance_of(StudFinder::Churn).to receive(:call).and_return(
+        StudFinder::Churn::Result.new(counts: files.to_h { |file| [file, 0] }, zero_inflated: false, zero_percentage: 0)
+      )
+
+      status, _stdout, stderr = run_cli([
+                                          root, '--min-files', '5', '--coverage', coverage_path,
+                                          '--weights', 'fan_in:0.35,complexity:0.25,churn:0.25,coverage:0.15'
+                                        ])
+
+      expect(status).to eq(0), stderr
+      expect(stderr).not_to include('coverage weight must be 0.0')
     end
   end
 end

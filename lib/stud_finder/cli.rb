@@ -6,6 +6,7 @@ require 'optparse'
 require 'time'
 require_relative 'churn'
 require_relative 'complexity'
+require_relative 'coverage/cobertura'
 require_relative 'fan_in'
 require_relative 'file_collector'
 require_relative 'scorer'
@@ -26,11 +27,12 @@ module StudFinder
       excludes: [],
       min_files: 20,
       top: nil,
-      verbose: false
+      verbose: false,
+      coverage_path: nil
     }.freeze
 
-    Analysis = Struct.new(:files, :fan_in, :complexity, :churn, :skipped_files, :warnings, :rows, :weights,
-                          keyword_init: true)
+    Analysis = Struct.new(:files, :fan_in, :complexity, :churn, :coverage, :coverage_available, :skipped_files,
+                          :warnings, :rows, :weights, keyword_init: true)
 
     class ValidationError < StandardError; end
 
@@ -64,13 +66,15 @@ module StudFinder
       emit_results(File.expand_path(path), result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
-           FileCollector::Error, Churn::Error, Complexity::Error, Scorer::ValidationError => e
+           FileCollector::Error, Churn::Error, Complexity::Error, Coverage::Cobertura::Error,
+           Scorer::ValidationError => e
       @stderr.puts e.message
       1
     end
 
     private
 
+    # rubocop:disable Metrics/MethodLength
     def option_parser
       OptionParser.new do |opts|
         opts.banner = 'Usage: stud-finder [PATH] [OPTIONS]'
@@ -87,6 +91,9 @@ module StudFinder
         opts.on('--weights WEIGHTS', 'fan_in:F,complexity:C,churn:H,coverage:V') do |value|
           @options[:weights] = parse_weights(value)
           @options[:custom_weights] = true
+        end
+        opts.on('--coverage PATH', 'Path to a Cobertura XML coverage report') do |value|
+          @options[:coverage_path] = value
         end
         opts.on('--trunk-threshold N', Integer,
                 'fan_in percentile cutoff for trunk classification (default: 85)') do |value|
@@ -118,6 +125,7 @@ module StudFinder
         end
       end
     end
+    # rubocop:enable Metrics/MethodLength
 
     def parse_weights(value)
       pairs = value.split(',').map do |entry|
@@ -153,6 +161,9 @@ module StudFinder
       raise ValidationError, 'Error: --min-files must be positive.' if @options[:min_files] <= 0
       raise ValidationError, 'Error: --top must be positive.' if @options[:top] && @options[:top] <= 0
       raise ValidationError, 'Error: --churn-days must be positive.' if @options[:churn_days] <= 0
+      if @options[:coverage_path] && !File.file?(@options[:coverage_path])
+        raise ValidationError, "Error: coverage file not found: #{@options[:coverage_path]}"
+      end
 
       validate_weights! if @options[:custom_weights]
     end
@@ -164,9 +175,13 @@ module StudFinder
       raise ValidationError, "Error: #{name.to_s.tr('_', '-')} must be between 1 and 99."
     end
 
+    def coverage_available?
+      !@options[:coverage_path].nil?
+    end
+
     def validate_weights!
       weights = @options[:weights]
-      if weights[:coverage].positive?
+      if weights[:coverage].positive? && !coverage_available?
         raise ValidationError, 'Error: coverage weight must be 0.0 in Phase 1 (no coverage data available).'
       end
 
@@ -176,6 +191,7 @@ module StudFinder
       raise ValidationError, format('Error: weights must sum to 1.0; actual sum is %.4f.', active_sum)
     end
 
+    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     def analyze(path, files)
       complexity_result = Complexity.new(repo_path: path, files: files, stderr: @stderr).call
       analysis_files = files - complexity_result.skipped_files
@@ -187,34 +203,50 @@ module StudFinder
         stderr: @stderr
       ).call
 
+      coverage_parser = nil
+      coverage_result = nil
+      if coverage_available?
+        coverage_parser = Coverage::Cobertura.new(path: @options[:coverage_path], files: analysis_files)
+        coverage_result = coverage_parser.call
+      end
+
       scorer = Scorer.new(
         files: analysis_files,
         fan_in: fan_in_result.counts,
         complexity: complexity_result.counts,
         churn: churn_result.counts,
+        coverage: coverage_result,
         weights: @options[:weights],
         branch_threshold: @options[:branch_threshold],
         trunk_threshold: @options[:trunk_threshold]
       )
 
-      warnings = %w[coverage_unavailable js_not_analyzed]
+      warnings = coverage_available? ? %w[js_not_analyzed] : %w[coverage_unavailable js_not_analyzed]
+      warnings << 'coverage_partial' if coverage_parser&.missing_files&.any?
       warnings << 'zero_churn_majority' if churn_result.zero_inflated
       warnings << 'files_skipped' if complexity_result.skipped_files.any?
       warnings << 'small_repo' if analysis_files.length < @options[:min_files]
 
-      @stderr.puts renormalization_note(weights: scorer.normalized_weights, stderr: true)
+      if coverage_available?
+        @stderr.puts 'Note: coverage data available. Score uses 4-factor formula.'
+      else
+        @stderr.puts scoring_note(weights: scorer.normalized_weights, stderr: true)
+      end
 
       Analysis.new(
         files: analysis_files,
         fan_in: fan_in_result.counts,
         complexity: complexity_result.counts,
         churn: churn_result.counts,
+        coverage: coverage_result,
+        coverage_available: coverage_available?,
         skipped_files: complexity_result.skipped_files,
         warnings: warnings,
         rows: scorer.call,
         weights: scorer.normalized_weights
       )
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
     def emit_results(path, result, analysis)
       rows = analysis.rows
@@ -249,7 +281,7 @@ module StudFinder
           churn_days: @options[:churn_days],
           file_count: analysis.files.length,
           files_skipped: analysis.skipped_files.length,
-          formula: '3-factor (no coverage)',
+          formula: analysis.coverage_available ? '4-factor' : '3-factor (no coverage)',
           weights: json_weights(analysis.weights),
           warnings: analysis.warnings
         },
@@ -260,26 +292,28 @@ module StudFinder
     def emit_markdown(analysis, rows)
       @stdout.puts "## stud-finder — #{Time.now.utc.strftime('%Y-%m-%d')}"
       @stdout.puts
-      @stdout.puts "> 3-factor score (no coverage). Churn window: #{@options[:churn_days]} days. " \
-                   "#{analysis.files.length} files analyzed."
+      @stdout.puts "> #{analysis.coverage_available ? '4-factor score' : '3-factor score (no coverage)'}. " \
+                   "Churn window: #{@options[:churn_days]} days. #{analysis.files.length} files analyzed."
       @stdout.puts '> JavaScript files not analyzed (Phase 1).'
       @stdout.puts
-      @stdout.puts '| rank | file | score | class | fan_in | complexity | churn |'
-      @stdout.puts '|------|------|-------|-------|--------|------------|-------|'
+      @stdout.puts '| rank | file | score | class | fan_in | complexity | churn | coverage |'
+      @stdout.puts '|------|------|-------|-------|--------|------------|-------|----------|'
       rows.each do |row|
         @stdout.puts "| #{row[:rank]} | #{row[:path]} | #{format_score(row[:score])} | #{row[:classification]} | " \
-                     "#{row[:fan_in]} | #{row[:complexity]} | #{row[:churn]} |"
+                     "#{row[:fan_in]} | #{row[:complexity]} | #{row[:churn]} | #{format_coverage(row[:coverage])} |"
       end
       @stdout.puts
       @stdout.puts '*fan_in is a static approximation — dynamic references not counted.*'
     end
 
     def emit_table(path, result, analysis, rows)
-      @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, 3-factor score)"
-      @stdout.puts renormalization_note(weights: analysis.weights, stderr: false)
+      formula = analysis.coverage_available ? '4-factor score' : '3-factor score'
+      @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, #{formula})"
+      @stdout.puts scoring_note(weights: analysis.weights, stderr: false) unless analysis.coverage_available
       @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
       @stdout.puts
-      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  churn'
+      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  churn  ' \
+                   'coverage'
       rows.each do |row|
         @stdout.puts table_row(row)
       end
@@ -301,7 +335,7 @@ module StudFinder
         complexity_pct: row[:complexity_pct],
         churn: row[:churn],
         churn_pct: row[:churn_pct],
-        coverage: nil
+        coverage: row[:coverage]
       }
     end
 
@@ -317,7 +351,7 @@ module StudFinder
         format_score(row[:complexity_pct]),
         row[:churn],
         format_score(row[:churn_pct]),
-        ''
+        row[:coverage] || ''
       ]
     end
 
@@ -326,11 +360,11 @@ module StudFinder
         fan_in: weights[:fan_in].round(4),
         complexity: weights[:complexity].round(4),
         churn: weights[:churn].round(4),
-        coverage: nil
+        coverage: weights[:coverage]&.round(4)
       }
     end
 
-    def renormalization_note(weights:, stderr:)
+    def scoring_note(weights:, stderr:)
       if stderr
         format('Note: coverage data not available. Score uses 3-factor formula (fan_in %<fan_in>.2f, ' \
                'complexity %<complexity>.2f, churn %<churn>.2f).', **weights)
@@ -353,11 +387,18 @@ module StudFinder
       format('%.4f', score)
     end
 
+    def format_coverage(coverage)
+      return 'n/a' if coverage.nil?
+
+      "#{(coverage * 100).round}%"
+    end
+
     def table_row(row)
-      format('%<rank>5d  %<path>-45s  %<score>6s  %<classification>-6s  %<fan_in>6d  %<complexity>10d  %<churn>5d',
+      format('%<rank>5d  %<path>-45s  %<score>6s  %<classification>-6s  %<fan_in>6d  %<complexity>10d  ' \
+             '%<churn>5d  %<coverage>8s',
              rank: row[:rank], path: row[:path], score: format_score(row[:score]),
              classification: row[:classification], fan_in: row[:fan_in], complexity: row[:complexity],
-             churn: row[:churn])
+             churn: row[:churn], coverage: format_coverage(row[:coverage]))
     end
   end
   # rubocop:enable Metrics/ClassLength
