@@ -1,0 +1,91 @@
+# frozen_string_literal: true
+
+require 'json'
+require 'open3'
+require 'spec_helper'
+
+RSpec.describe 'fixture repo integration' do
+  let(:source_fixture) { File.expand_path('../fixtures/sample_app', __dir__) }
+  let(:repo_path) { Dir.mktmpdir('stud-finder-sample-app') }
+  let(:bin_path) { File.expand_path('../../bin/stud-finder', __dir__) }
+
+  before do
+    FileUtils.cp_r(Dir.glob(File.join(source_fixture, '*')), repo_path)
+    initialize_git_repo
+  end
+
+  after do
+    FileUtils.remove_entry(repo_path)
+  end
+
+  it 'ranks the sample app and emits valid table output' do
+    stdout, stderr, status = run_cli('--min-files', '5')
+
+    expect(status).to be_success, stderr
+    expect(stdout).to include('rank')
+    expect(stdout).to include('score')
+    expect(stdout).to include('class')
+    expect(stdout).to include('JavaScript files not analyzed')
+    expect(top_table_row(stdout)).to include('app/models/user.rb')
+    expect(top_table_score(stdout)).to be > 0.0
+  end
+
+  it 'emits normative JSON output with ranked scores' do
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json')
+    payload = JSON.parse(stdout)
+
+    expect(status).to be_success, stderr
+    expect(payload.keys).to contain_exactly('meta', 'files')
+    expect(payload['meta'].keys).to include('repo', 'analyzed_at', 'churn_days', 'file_count', 'files_skipped',
+                                            'formula', 'weights', 'warnings')
+    expect(payload['meta']['warnings']).to include('coverage_unavailable', 'js_not_analyzed')
+    expect(payload['meta']['weights']).to eq(
+      'fan_in' => 0.4118,
+      'complexity' => 0.2941,
+      'churn' => 0.2941,
+      'coverage' => nil
+    )
+
+    files = payload.fetch('files')
+    expect(files.first['path']).to eq('app/models/user.rb')
+    expect(files.first['score']).to be > 0.0
+    expect(files.map { |file| file['score'] }).to all(be_between(0.0, 1.0).inclusive)
+    expect(files.map { |file| file['score'] }).to eq(files.map { |file| file['score'] }.sort.reverse)
+    expect(files.first.keys).to include('rank', 'path', 'score', 'class', 'fan_in', 'fan_in_pct', 'complexity',
+                                        'complexity_pct', 'churn', 'churn_pct', 'coverage')
+  end
+
+  it 'emits markdown output' do
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'markdown')
+
+    expect(status).to be_success, stderr
+    expect(stdout).to include('| rank | file | score | class | fan_in | complexity | churn |')
+    expect(stdout).to include('| 1 | app/models/user.rb |')
+  end
+
+  def run_cli(*args)
+    Open3.capture3('bundle', 'exec', 'ruby', bin_path, repo_path, *args)
+  end
+
+  def initialize_git_repo
+    system('git', 'init', '-q', repo_path)
+    system('git', '-C', repo_path, 'config', 'user.email', 'stud-finder@example.test')
+    system('git', '-C', repo_path, 'config', 'user.name', 'Stud Finder')
+    system('git', '-C', repo_path, 'add', '.')
+    system('git', '-C', repo_path, 'commit', '-qm', 'initial sample app')
+    File.open(File.join(repo_path, 'app/models/user.rb'), 'a') { |file| file.puts "\n# churn marker" }
+    system('git', '-C', repo_path, 'add', 'app/models/user.rb')
+    system('git', '-C', repo_path, 'commit', '-qm', 'touch user model')
+    File.open(File.join(repo_path, 'app/models/user.rb'), 'a') { |file| file.puts '# another churn marker' }
+    system('git', '-C', repo_path, 'add', 'app/models/user.rb')
+    system('git', '-C', repo_path, 'commit', '-qm', 'touch user model again')
+  end
+
+  def top_table_row(stdout)
+    stdout.lines.find { |line| line.match?(/^\s*1\s+/) }
+  end
+
+  def top_table_score(stdout)
+    top_table_row(stdout).split[2].to_f
+  end
+end
