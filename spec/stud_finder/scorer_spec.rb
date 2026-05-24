@@ -56,6 +56,15 @@ RSpec.describe StudFinder::Scorer do
     expect(rows['b.rb'][:coverage]).to eq(0.5)
   end
 
+  it 'uses renormalized three-factor scoring for a file with nil coverage' do
+    rows = scorer(coverage: { 'a.rb' => 1.0, 'b.rb' => nil, 'c.rb' => 0.0, 'd.rb' => 0.25 },
+                  weights: { fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15 }).call
+           .to_h { |row| [row[:path], row] }
+
+    expect(rows['b.rb'][:score]).to be_within(0.0001).of(0.7647)
+    expect(rows['b.rb'][:coverage]).to be_nil
+  end
+
   it 'does not renormalize weights when coverage is active' do
     weights = scorer(coverage: { 'a.rb' => 1.0, 'b.rb' => 0.5, 'c.rb' => 0.0, 'd.rb' => 0.25 },
                      weights: { fan_in: 0.35, complexity: 0.25, churn: 0.25, coverage: 0.15 }).normalized_weights
@@ -66,11 +75,11 @@ RSpec.describe StudFinder::Scorer do
 
   it 'uses 1.0 minus coverage fraction directly instead of percentile ranking coverage' do
     rows = scorer(coverage: { 'a.rb' => 0.0, 'b.rb' => 1.0, 'c.rb' => 1.0, 'd.rb' => 1.0 },
-                  weights: { fan_in: 0.0, complexity: 0.0, churn: 0.0, coverage: 1.0 }).call
+                  weights: { fan_in: 0.01, complexity: 0.0, churn: 0.0, coverage: 0.99 }).call
            .to_h { |row| [row[:path], row] }
 
     expect(rows['a.rb'][:score]).to eq(1.0)
-    expect(rows['b.rb'][:score]).to eq(0.0)
+    expect(rows['d.rb'][:score]).to eq(0.0)
   end
 
   it 'raises when branch threshold is not less than trunk threshold' do

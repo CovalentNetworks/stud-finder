@@ -64,12 +64,30 @@ RSpec.describe 'fixture repo integration' do
     expect(payload['meta']['formula']).to eq('4-factor')
     expect(payload['meta']['weights']['coverage']).to eq(0.15)
     expect(payload['meta']['warnings']).not_to include('coverage_unavailable')
-    expect(payload['files'].map { |file| file['coverage'] }).not_to include(nil)
+    expect(payload['meta']['warnings']).to include('coverage_partial')
 
     files = payload['files'].to_h { |file| [file['path'], file] }
     expect(files['app/models/user.rb']['coverage']).to eq(1.0)
     expect(files['app/services/auth_service.rb']['coverage']).to eq(0.0)
     expect(files['app/services/auth_service.rb']['score']).to be > files['app/services/post_service.rb']['score']
+  end
+
+  it 'scores files absent from a partial Cobertura report with the renormalized three-factor formula' do
+    coverage_path = File.join(repo_path, 'coverage/coverage.xml')
+    coverage_xml = File.read(coverage_path)
+    File.write(coverage_path, coverage_xml.sub(%r{\s*<class filename="app/models/post\.rb" line-rate="0\.95" />}, ''))
+
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--coverage', coverage_path)
+    payload = JSON.parse(stdout)
+
+    expect(status).to be_success, stderr
+    expect(payload['meta']['warnings']).to include('coverage_partial')
+
+    files = payload['files'].to_h { |file| [file['path'], file] }
+    expect(files['app/models/post.rb']['coverage']).to be_nil
+    expect(files['app/models/post.rb']['score']).to be_within(0.0001).of(0.3706)
+    expect(files['app/models/profile.rb']['coverage']).to eq(0.75)
+    expect(files['app/models/profile.rb']['score']).to be_within(0.0001).of(0.3175)
   end
 
   it 'emits markdown output' do
