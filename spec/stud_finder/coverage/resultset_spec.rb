@@ -82,6 +82,26 @@ RSpec.describe StudFinder::Coverage::Resultset do
     expect(coverage['app/models/user.rb']).to eq(1.0)
   end
 
+  it 'keeps trailing executable lines when a later suite has longer line coverage' do
+    coverage = parse_resultset(
+      {
+        'RSpec' => {
+          'coverage' => {
+            'app/models/user.rb' => { 'lines' => [1] }
+          }
+        },
+        'Minitest' => {
+          'coverage' => {
+            'app/models/user.rb' => { 'lines' => [0, 0] }
+          }
+        }
+      },
+      files: ['app/models/user.rb']
+    )
+
+    expect(coverage['app/models/user.rb']).to eq(0.5)
+  end
+
   it 'returns 0.0 when all lines are null' do
     coverage = parse_resultset(
       {

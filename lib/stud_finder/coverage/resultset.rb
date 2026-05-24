@@ -45,7 +45,12 @@ module StudFinder
       end
 
       def merge_lines(previous_lines, new_lines)
-        previous_lines.zip(new_lines).map do |previous, current|
+        max_length = [previous_lines.length, new_lines.length].max
+
+        (0...max_length).map do |index|
+          previous = previous_lines[index]
+          current = new_lines[index]
+
           previous.nil? && current.nil? ? nil : [previous || 0, current || 0].max
         end
       end
