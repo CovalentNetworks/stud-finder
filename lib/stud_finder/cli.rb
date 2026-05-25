@@ -292,14 +292,14 @@ module StudFinder
     def ruby_coverage(path, files)
       return [nil, nil] unless @options[:ruby_coverage_path]
 
-      parser = Coverage::Detector.for(path: @options[:ruby_coverage_path], files: files, repo_path: path)
+      parser = Coverage::Detector.for(path: @options[:ruby_coverage_path], files: files, project_root: path)
       [parser.call, parser]
     end
 
     def js_coverage(path, files)
       return [nil, nil] unless @options[:js_coverage_path]
 
-      parser = Coverage::Detector.for(path: @options[:js_coverage_path], files: files, repo_path: path)
+      parser = Coverage::Detector.for(path: @options[:js_coverage_path], files: files, project_root: path)
       [parser.call, parser]
     end
 

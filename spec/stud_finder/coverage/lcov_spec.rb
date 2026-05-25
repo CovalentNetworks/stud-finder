@@ -12,9 +12,9 @@ RSpec.describe StudFinder::Coverage::Lcov do
     file.path
   end
 
-  def parse(content, files: %w[app/models/user.rb app/models/post.rb], repo_path: nil)
+  def parse(content, files: %w[app/models/user.rb app/models/post.rb], project_root: nil)
     path = write_report(content)
-    described_class.new(path: path, files: files, repo_path: repo_path).call
+    described_class.new(path: path, files: files, project_root: project_root).call
   ensure
     FileUtils.rm_f(path) if path
   end
@@ -72,9 +72,47 @@ RSpec.describe StudFinder::Coverage::Lcov do
     expect(coverage['app/javascript/components/Foo.jsx']).to eq(0.25)
   end
 
+  it 'maps absolute SF paths from another machine by walking suffixes' do
+    coverage = parse(<<~LCOV, files: ['app/models/user.rb'], project_root: '/home/fernando/Projects/covalent-ojt')
+      SF:/Users/fernandobaz/Desktop/covalent-ojt/app/models/user.rb
+      LF:3
+      LH:2
+      end_of_record
+    LCOV
+
+    expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+  end
+
+  it 'uses the most specific suffix when absolute SF paths are ambiguous' do
+    coverage = parse(
+      <<~LCOV,
+        SF:/Users/fernandobaz/Desktop/covalent-ojt/app/models/user.rb
+        LF:3
+        LH:2
+        end_of_record
+      LCOV
+      files: ['user.rb', 'app/models/user.rb'],
+      project_root: '/home/fernando/Projects/covalent-ojt'
+    )
+
+    expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+    expect(coverage['user.rb']).to eq(0.0)
+  end
+
+  it 'leaves unmatched absolute SF paths safely unmapped' do
+    coverage = parse(<<~LCOV, files: ['app/models/user.rb'])
+      SF:/Users/fernandobaz/Desktop/other-app/lib/tasks/report.rb
+      LF:2
+      LH:2
+      end_of_record
+    LCOV
+
+    expect(coverage['app/models/user.rb']).to eq(0.0)
+  end
+
   it 'strips the target project root from absolute SF paths' do
     Dir.mktmpdir do |root|
-      coverage = parse(<<~LCOV, files: ['src/foo.js'], repo_path: root)
+      coverage = parse(<<~LCOV, files: ['src/foo.js'], project_root: root)
         SF:#{root}/src/foo.js
         LF:8
         LH:6
