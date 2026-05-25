@@ -3,6 +3,7 @@
 require 'json'
 require 'open3'
 require 'spec_helper'
+require 'stud_finder/cli'
 
 RSpec.describe 'fixture repo integration' do
   let(:source_fixture) { File.expand_path('../fixtures/sample_app', __dir__) }
@@ -43,12 +44,14 @@ RSpec.describe 'fixture repo integration' do
     expect(payload['javascript']).to eq([])
 
     files = payload.fetch('ruby')
+    expect(files.first['language']).to eq('ruby')
     expect(files.first['path']).to eq('app/models/user.rb')
     expect(files.first['score']).to be > 0.0
     expect(files.map { |file| file['score'] }).to all(be_between(0.0, 1.0).inclusive)
     expect(files.map { |file| file['score'] }).to eq(files.map { |file| file['score'] }.sort.reverse)
-    expect(files.first.keys).to include('rank', 'path', 'score', 'class', 'fan_in', 'fan_in_pct', 'complexity',
-                                        'complexity_pct', 'churn_commits', 'churn_lines', 'churn_pct', 'coverage')
+    expect(files.first.keys).to include('rank', 'language', 'path', 'score', 'class', 'fan_in', 'fan_in_pct',
+                                        'complexity', 'complexity_pct', 'churn_commits', 'churn_lines', 'churn_pct',
+                                        'coverage')
   end
 
   it 'emits JSON output with Cobertura coverage integrated' do
@@ -83,10 +86,8 @@ RSpec.describe 'fixture repo integration' do
     stdout, stderr, status = run_cli('--min-files', '5', '--output', 'markdown')
 
     expect(status).to be_success, stderr
-    expect(stdout).to include(
-      '| rank | file | score | class | fan_in | complexity | churn_commits | churn_lines | churn_pct | coverage |'
-    )
-    expect(stdout).to include('| 1 | app/models/user.rb |')
+    expect(stdout).to include("| #{StudFinder::CLI::MARKDOWN_COLUMNS.join(' | ')} |")
+    expect(stdout).to include('| 1 | ruby | app/models/user.rb |')
   end
 
   def run_cli(*args)
@@ -112,6 +113,6 @@ RSpec.describe 'fixture repo integration' do
   end
 
   def top_table_score(stdout)
-    top_table_row(stdout).split[2].to_f
+    top_table_row(stdout).split[3].to_f
   end
 end

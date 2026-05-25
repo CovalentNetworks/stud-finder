@@ -240,6 +240,8 @@ RSpec.describe StudFinder::CLI do
       expect(stderr).to include('Score uses 3-factor formula')
       expect(stdout).to include('JavaScript/TypeScript')
       expect(stdout).to include('5 files analyzed')
+      expect(stdout).to match(/rank\s+language\s+file\s+score/)
+      expect(stdout).to include('ruby')
       expect(stdout).to include('score')
       expect(stdout).to include('complexity')
       expect(stdout).to include('churn_commits')
@@ -314,7 +316,9 @@ RSpec.describe StudFinder::CLI do
       expect(rows.first).to eq(
         StudFinder::CLI::RESULT_COLUMNS
       )
-      expect(rows.last).to eq(['1', file, '0.5882', 'leaf', '0', '0.0000', '7', '1.0000', '3', '15', '1.0000', ''])
+      expect(rows.last).to eq(
+        ['1', 'ruby', file, '0.5882', 'leaf', '0', '0.0000', '7', '1.0000', '3', '15', '1.0000', '']
+      )
       expect(lines.last).to end_with(",\"\"\n")
     end
   end
