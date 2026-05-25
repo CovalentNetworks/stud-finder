@@ -9,6 +9,7 @@ require_relative 'complexity'
 require_relative 'coverage/detector'
 require_relative 'fan_in'
 require_relative 'js_fan_in'
+require_relative 'js_complexity'
 require_relative 'file_collector'
 require_relative 'scorer'
 require_relative 'version'
@@ -204,7 +205,7 @@ module StudFinder
     end
 
     def coverage_available?
-      !@options[:ruby_coverage_path].nil?
+      !@options[:ruby_coverage_path].nil? || !@options[:js_coverage_path].nil?
     end
 
     def validate_weights!
@@ -252,10 +253,12 @@ module StudFinder
       progress('computing JavaScript fan_in (dependency-cruiser)...')
       fan_in_result = JsFanIn.new(repo_path: path, files: files, js_timeout: @options[:js_timeout],
                                   stderr: @stderr).call
+      progress('computing JavaScript complexity (eslint)...')
+      complexity_result = JsComplexity.new(repo_path: path, files: files, js_timeout: @options[:js_timeout],
+                                           stderr: @stderr).call
       churn_result = Churn.new(repo_path: path, files: files, days: @options[:churn_days], stderr: @stderr).call
-      complexity = files.to_h { |file| [file, 0] }
-      score_group(files, fan_in_result.counts, complexity, churn_result, [], nil,
-                  language_by_file: languages, extra_warnings: fan_in_result.warnings)
+      score_group(files, fan_in_result.counts, complexity_result.counts, churn_result, [], js_coverage(path, files),
+                  language_by_file: languages, extra_warnings: fan_in_result.warnings + complexity_result.warnings)
     end
 
     # rubocop:disable Metrics/ParameterLists
@@ -286,10 +289,17 @@ module StudFinder
       row.merge(language: language_by_file.fetch(row[:path]).to_s)
     end
 
-    def ruby_coverage(_path, files)
-      return [nil, nil] unless coverage_available?
+    def ruby_coverage(path, files)
+      return [nil, nil] unless @options[:ruby_coverage_path]
 
-      parser = Coverage::Detector.for(path: @options[:ruby_coverage_path], files: files)
+      parser = Coverage::Detector.for(path: @options[:ruby_coverage_path], files: files, repo_path: path)
+      [parser.call, parser]
+    end
+
+    def js_coverage(path, files)
+      return [nil, nil] unless @options[:js_coverage_path]
+
+      parser = Coverage::Detector.for(path: @options[:js_coverage_path], files: files, repo_path: path)
       [parser.call, parser]
     end
 
@@ -366,7 +376,7 @@ module StudFinder
         churn_days: @options[:churn_days],
         file_count: analysis.ruby.files.length + analysis.javascript.files.length,
         files_skipped: analysis.ruby.skipped_files.length + analysis.javascript.skipped_files.length,
-        formula: analysis.ruby.coverage_available ? '4-factor' : '3-factor (no coverage)',
+        formula: report_coverage_available?(analysis) ? '4-factor' : '3-factor (no coverage)',
         weights: json_weights(analysis.ruby.weights || analysis.javascript.weights),
         warnings: analysis.warnings
       }
@@ -376,7 +386,7 @@ module StudFinder
       @stdout.puts "## stud-finder — #{Time.now.utc.strftime('%Y-%m-%d')}"
       @stdout.puts
       file_count = analysis.ruby.files.length + analysis.javascript.files.length
-      @stdout.puts "> #{analysis.ruby.coverage_available ? '4-factor score' : '3-factor score (no coverage)'}. " \
+      @stdout.puts "> #{report_coverage_available?(analysis) ? '4-factor score' : '3-factor score (no coverage)'}. " \
                    "Churn window: #{@options[:churn_days]} days. #{file_count} files analyzed."
       emit_markdown_section('Ruby', ruby_rows)
       emit_markdown_section('JavaScript/TypeScript', javascript_rows)
@@ -394,9 +404,10 @@ module StudFinder
     end
 
     def emit_table(path, result, analysis, ruby_rows, javascript_rows)
-      formula = analysis.ruby.coverage_available ? '4-factor score' : '3-factor score'
+      coverage_available = report_coverage_available?(analysis)
+      formula = coverage_available ? '4-factor score' : '3-factor score'
       @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, #{formula})"
-      unless analysis.ruby.coverage_available
+      unless coverage_available
         @stdout.puts scoring_note(weights: analysis.ruby.weights || analysis.javascript.weights,
                                   stderr: false)
       end
@@ -443,6 +454,10 @@ module StudFinder
         format_score(row[:churn_pct]),
         row[:coverage] || ''
       ]
+    end
+
+    def report_coverage_available?(analysis)
+      analysis.ruby.coverage_available || analysis.javascript.coverage_available
     end
 
     def json_weights(weights)

@@ -9,9 +9,10 @@ module StudFinder
 
       attr_reader :missing_files
 
-      def initialize(path:, files:)
+      def initialize(path:, files:, repo_path: nil)
         @path = path
         @files = files
+        @repo_path = repo_path
         @missing_files = []
       end
 
