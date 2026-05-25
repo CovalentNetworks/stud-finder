@@ -8,6 +8,7 @@ require_relative 'churn'
 require_relative 'complexity'
 require_relative 'coverage/detector'
 require_relative 'fan_in'
+require_relative 'js_fan_in'
 require_relative 'file_collector'
 require_relative 'scorer'
 require_relative 'version'
@@ -32,11 +33,15 @@ module StudFinder
       min_files: 20,
       top: nil,
       verbose: false,
-      coverage_path: nil
+      ruby_coverage_path: nil,
+      js_coverage_path: nil,
+      js_timeout: 60,
+      cli_warnings: []
     }.freeze
 
     Analysis = Struct.new(:files, :fan_in, :complexity, :churn_commits, :churn_lines, :coverage, :coverage_available,
                           :skipped_files, :warnings, :rows, :weights, keyword_init: true)
+    Report = Struct.new(:ruby, :javascript, :warnings, keyword_init: true)
 
     class ValidationError < StandardError; end
 
@@ -67,7 +72,7 @@ module StudFinder
       ).collect
       progress("collecting files... #{result.files.length} found")
 
-      analysis = analyze(File.expand_path(path), result.files)
+      analysis = analyze(File.expand_path(path), result.files, result.languages)
       emit_results(File.expand_path(path), result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
@@ -79,7 +84,7 @@ module StudFinder
 
     private
 
-    # rubocop:disable Metrics/MethodLength
+    # rubocop:disable Metrics/AbcSize, Metrics/BlockLength, Metrics/MethodLength
     def option_parser
       OptionParser.new do |opts|
         opts.banner = 'Usage: stud-finder [PATH] [OPTIONS]'
@@ -97,8 +102,19 @@ module StudFinder
           @options[:weights] = parse_weights(value)
           @options[:custom_weights] = true
         end
-        opts.on('--coverage PATH', 'Path to a coverage report (.xml, .info, .json)') do |value|
-          @options[:coverage_path] = value
+        opts.on('--ruby-coverage PATH', 'Path to a Ruby coverage report (.xml, .info, .json)') do |value|
+          @options[:ruby_coverage_path] = value
+        end
+        opts.on('--js-coverage PATH', 'Path to a JavaScript coverage report (reserved for Phase 2 Chunk B)') do |value|
+          @options[:js_coverage_path] = value
+        end
+        opts.on('--coverage PATH', 'Deprecated alias for --ruby-coverage') do |value|
+          @options[:ruby_coverage_path] = value
+          @options[:cli_warnings] << 'coverage_flag_deprecated'
+          @stderr.puts 'Warning: coverage_flag_deprecated: --coverage is deprecated; use --ruby-coverage.'
+        end
+        opts.on('--js-timeout N', Integer, 'dependency-cruiser timeout in seconds (default: 60)') do |value|
+          @options[:js_timeout] = value
         end
         opts.on('--trunk-threshold N', Integer,
                 'fan_in percentile cutoff for trunk classification (default: 85)') do |value|
@@ -130,7 +146,7 @@ module StudFinder
         end
       end
     end
-    # rubocop:enable Metrics/MethodLength
+    # rubocop:enable Metrics/AbcSize, Metrics/BlockLength, Metrics/MethodLength
 
     def parse_weights(value)
       pairs = value.split(',').map do |entry|
@@ -166,9 +182,13 @@ module StudFinder
       raise ValidationError, 'Error: --min-files must be positive.' if @options[:min_files] <= 0
       raise ValidationError, 'Error: --top must be positive.' if @options[:top] && @options[:top] <= 0
       raise ValidationError, 'Error: --churn-days must be positive.' if @options[:churn_days] <= 0
-      if @options[:coverage_path] && !File.file?(@options[:coverage_path])
-        raise ValidationError, "Error: coverage file not found: #{@options[:coverage_path]}"
+      if @options[:ruby_coverage_path] && !File.file?(@options[:ruby_coverage_path])
+        raise ValidationError, "Error: coverage file not found: #{@options[:ruby_coverage_path]}"
       end
+      if @options[:js_coverage_path] && !File.file?(@options[:js_coverage_path])
+        raise ValidationError, "Error: JS coverage file not found: #{@options[:js_coverage_path]}"
+      end
+      raise ValidationError, 'Error: --js-timeout must be positive.' if @options[:js_timeout] <= 0
 
       validate_weights! if @options[:custom_weights]
     end
@@ -181,7 +201,7 @@ module StudFinder
     end
 
     def coverage_available?
-      !@options[:coverage_path].nil?
+      !@options[:ruby_coverage_path].nil?
     end
 
     def validate_weights!
@@ -196,88 +216,122 @@ module StudFinder
       raise ValidationError, format('Error: weights must sum to 1.0; actual sum is %.4f.', active_sum)
     end
 
-    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-    def analyze(path, files)
-      progress('computing fan_in (rubocop-ast)...')
+    def analyze(path, files, languages)
+      ruby_files = files.select { |file| languages[file] == :ruby }
+      js_files = files.select { |file| %i[javascript typescript].include?(languages[file]) }
+
+      ruby_analysis = ruby_files.empty? ? empty_analysis : analyze_ruby(path, ruby_files)
+      javascript_analysis = js_files.empty? ? empty_analysis : analyze_javascript(path, js_files)
+
+      progress('done')
+      Report.new(ruby: ruby_analysis, javascript: javascript_analysis,
+                 warnings: (ruby_analysis.warnings + javascript_analysis.warnings + @options[:cli_warnings]).uniq)
+    end
+
+    def analyze_ruby(path, files)
+      progress('computing Ruby fan_in (rubocop-ast)...')
       fan_in_result = FanIn.new(repo_path: path, files: files).call
 
-      progress('computing complexity (rubocop)...')
+      progress('computing Ruby complexity (rubocop)...')
       complexity_result = Complexity.new(repo_path: path, files: files, stderr: @stderr).call
       analysis_files = files - complexity_result.skipped_files
 
-      progress("computing churn (git log, #{@options[:churn_days]} days)...")
-      churn_result = Churn.new(
-        repo_path: path,
-        files: analysis_files,
-        days: @options[:churn_days],
-        stderr: @stderr
-      ).call
+      progress("computing Ruby churn (git log, #{@options[:churn_days]} days)...")
+      churn_result = Churn.new(repo_path: path, files: analysis_files, days: @options[:churn_days],
+                               stderr: @stderr).call
 
-      progress("normalizing + scoring #{analysis_files.length} files...")
+      score_group(analysis_files, fan_in_result.counts, complexity_result.counts, churn_result,
+                  complexity_result.skipped_files, ruby_coverage(path, analysis_files))
+    end
 
-      coverage_parser = nil
-      coverage_result = nil
-      if coverage_available?
-        coverage_parser = Coverage::Detector.for(path: @options[:coverage_path], files: analysis_files)
-        coverage_result = coverage_parser.call
-      end
+    def analyze_javascript(path, files)
+      progress('computing JavaScript fan_in (dependency-cruiser)...')
+      fan_in_result = JsFanIn.new(repo_path: path, files: files, js_timeout: @options[:js_timeout],
+                                  stderr: @stderr).call
+      churn_result = Churn.new(repo_path: path, files: files, days: @options[:churn_days], stderr: @stderr).call
+      complexity = files.to_h { |file| [file, 0] }
+      score_group(files, fan_in_result.counts, complexity, churn_result, [], nil,
+                  extra_warnings: fan_in_result.warnings)
+    end
 
-      scorer = Scorer.new(
-        files: analysis_files,
-        fan_in: fan_in_result.counts,
-        complexity: complexity_result.counts,
-        churn: churn_result.counts,
-        churn_lines: churn_result.line_counts,
-        coverage: coverage_result,
-        weights: @options[:weights],
-        branch_threshold: @options[:branch_threshold],
-        trunk_threshold: @options[:trunk_threshold]
-      )
-
-      warnings = coverage_available? ? %w[js_not_analyzed] : %w[coverage_unavailable js_not_analyzed]
+    # rubocop:disable Metrics/ParameterLists
+    def score_group(files, fan_in, complexity, churn_result, skipped_files, coverage_payload, extra_warnings: [])
+      progress("normalizing + scoring #{files.length} files...")
+      coverage_result, coverage_parser = coverage_payload
+      scorer = Scorer.new(files: files, fan_in: fan_in, complexity: complexity, churn: churn_result.counts,
+                          churn_lines: churn_result.line_counts, coverage: coverage_result, weights: @options[:weights],
+                          branch_threshold: @options[:branch_threshold], trunk_threshold: @options[:trunk_threshold])
+      warnings = extra_warnings.dup
+      warnings << 'coverage_unavailable' unless coverage_result
       warnings << 'coverage_partial' if coverage_parser&.missing_files&.any?
       warnings << 'zero_churn_majority' if churn_result.zero_inflated
-      warnings << 'files_skipped' if complexity_result.skipped_files.any?
-      warnings << 'small_repo' if analysis_files.length < @options[:min_files]
+      warnings << 'files_skipped' if skipped_files.any?
+      warnings << 'small_repo' if files.length < @options[:min_files]
+      emit_scoring_note(scorer, coverage_result)
+      Analysis.new(
+        files: files, fan_in: fan_in, complexity: complexity, churn_commits: churn_result.churn_commits,
+        churn_lines: churn_result.churn_lines, coverage: coverage_result,
+        coverage_available: !coverage_result.nil?, skipped_files: skipped_files, warnings: warnings.uniq,
+        rows: scorer.call, weights: scorer.normalized_weights
+      )
+    end
+    # rubocop:enable Metrics/ParameterLists
 
-      if coverage_available?
+    def ruby_coverage(_path, files)
+      return [nil, nil] unless coverage_available?
+
+      parser = Coverage::Detector.for(path: @options[:ruby_coverage_path], files: files)
+      [parser.call, parser]
+    end
+
+    def emit_scoring_note(scorer, coverage_result)
+      if coverage_result
         @stderr.puts 'Note: coverage data available. Score uses 4-factor formula.'
       else
         @stderr.puts scoring_note(weights: scorer.normalized_weights, stderr: true)
       end
-
-      analysis = Analysis.new(
-        files: analysis_files,
-        fan_in: fan_in_result.counts,
-        complexity: complexity_result.counts,
-        churn_commits: churn_result.churn_commits,
-        churn_lines: churn_result.churn_lines,
-        coverage: coverage_result,
-        coverage_available: coverage_available?,
-        skipped_files: complexity_result.skipped_files,
-        warnings: warnings,
-        rows: scorer.call,
-        weights: scorer.normalized_weights
-      )
-      progress('done')
-      analysis
     end
-    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
     def emit_results(path, result, analysis)
-      rows = analysis.rows
-      rows = rows.first(@options[:top]) if @options[:top]
+      ruby_rows = limited_rows(analysis.ruby.rows)
+      javascript_rows = limited_rows(analysis.javascript.rows)
 
       case @options[:output]
       when 'json'
-        emit_json(path, analysis, rows)
+        emit_json(path, analysis, ruby_rows, javascript_rows)
       when 'markdown'
-        emit_markdown(analysis, rows)
+        emit_markdown(analysis, ruby_rows, javascript_rows)
       when 'csv'
-        emit_csv(rows)
+        emit_csv(ruby_rows + javascript_rows)
       else
-        emit_table(path, result, analysis, rows)
+        emit_table(path, result, analysis, ruby_rows, javascript_rows)
       end
+    end
+
+    def limited_rows(rows)
+      @options[:top] ? rows.first(@options[:top]) : rows
+    end
+
+    def empty_analysis
+      Analysis.new(files: [], fan_in: {}, complexity: {}, churn_commits: {}, churn_lines: {}, coverage: nil,
+                   coverage_available: false, skipped_files: [], warnings: [], rows: [], weights: nil)
+    end
+
+    def emit_markdown_section(title, rows)
+      @stdout.puts "### #{title}"
+      @stdout.puts
+      @stdout.puts "| #{MARKDOWN_COLUMNS.join(' | ')} |"
+      @stdout.puts "| #{MARKDOWN_COLUMNS.map { '---' }.join(' | ')} |"
+      rows.each { |row| @stdout.puts markdown_row(row) }
+      @stdout.puts
+    end
+
+    def emit_table_section(title, rows)
+      @stdout.puts title
+      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  ' \
+                   'churn_commits  churn_lines  churn_pct  coverage'
+      rows.each { |row| @stdout.puts table_row(row) }
+      @stdout.puts
     end
 
     def emit_csv(rows)
@@ -287,34 +341,36 @@ module StudFinder
       end
     end
 
-    def emit_json(path, analysis, rows)
+    def emit_json(path, analysis, ruby_rows, javascript_rows)
       @stdout.puts JSON.generate(
-        meta: {
-          repo: path,
-          analyzed_at: Time.now.utc.iso8601,
-          churn_days: @options[:churn_days],
-          file_count: analysis.files.length,
-          files_skipped: analysis.skipped_files.length,
-          formula: analysis.coverage_available ? '4-factor' : '3-factor (no coverage)',
-          weights: json_weights(analysis.weights),
-          warnings: analysis.warnings
-        },
-        files: rows.map { |row| json_file(row) }
+        meta: json_meta(path, analysis),
+        warnings: analysis.warnings,
+        ruby: ruby_rows.map { |row| json_file(row) },
+        javascript: javascript_rows.map { |row| json_file(row) }
       )
     end
 
-    def emit_markdown(analysis, rows)
+    def json_meta(path, analysis)
+      {
+        repo: path,
+        analyzed_at: Time.now.utc.iso8601,
+        churn_days: @options[:churn_days],
+        file_count: analysis.ruby.files.length + analysis.javascript.files.length,
+        files_skipped: analysis.ruby.skipped_files.length + analysis.javascript.skipped_files.length,
+        formula: analysis.ruby.coverage_available ? '4-factor' : '3-factor (no coverage)',
+        weights: json_weights(analysis.ruby.weights || analysis.javascript.weights),
+        warnings: analysis.warnings
+      }
+    end
+
+    def emit_markdown(analysis, ruby_rows, javascript_rows)
       @stdout.puts "## stud-finder — #{Time.now.utc.strftime('%Y-%m-%d')}"
       @stdout.puts
-      @stdout.puts "> #{analysis.coverage_available ? '4-factor score' : '3-factor score (no coverage)'}. " \
-                   "Churn window: #{@options[:churn_days]} days. #{analysis.files.length} files analyzed."
-      @stdout.puts '> JavaScript files not analyzed (Phase 1).'
-      @stdout.puts
-      @stdout.puts "| #{MARKDOWN_COLUMNS.join(' | ')} |"
-      @stdout.puts "| #{MARKDOWN_COLUMNS.map { '---' }.join(' | ')} |"
-      rows.each do |row|
-        @stdout.puts markdown_row(row)
-      end
+      file_count = analysis.ruby.files.length + analysis.javascript.files.length
+      @stdout.puts "> #{analysis.ruby.coverage_available ? '4-factor score' : '3-factor score (no coverage)'}. " \
+                   "Churn window: #{@options[:churn_days]} days. #{file_count} files analyzed."
+      emit_markdown_section('Ruby', ruby_rows)
+      emit_markdown_section('JavaScript/TypeScript', javascript_rows)
       @stdout.puts
       @stdout.puts '*fan_in is a static approximation — dynamic references not counted.*'
     end
@@ -327,17 +383,16 @@ module StudFinder
       "| #{values.join(' | ')} |"
     end
 
-    def emit_table(path, result, analysis, rows)
-      formula = analysis.coverage_available ? '4-factor score' : '3-factor score'
+    def emit_table(path, result, analysis, ruby_rows, javascript_rows)
+      formula = analysis.ruby.coverage_available ? '4-factor score' : '3-factor score'
       @stdout.puts "stud-finder — #{path} (#{@options[:churn_days]}-day churn, #{formula})"
-      @stdout.puts scoring_note(weights: analysis.weights, stderr: false) unless analysis.coverage_available
-      @stdout.puts 'Note: JavaScript files not analyzed (Phase 1). Cross-language dependencies not tracked.'
-      @stdout.puts
-      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  ' \
-                   'churn_commits  churn_lines  churn_pct  coverage'
-      rows.each do |row|
-        @stdout.puts table_row(row)
+      unless analysis.ruby.coverage_available
+        @stdout.puts scoring_note(weights: analysis.ruby.weights || analysis.javascript.weights,
+                                  stderr: false)
       end
+      @stdout.puts
+      emit_table_section('Ruby', ruby_rows)
+      emit_table_section('JavaScript/TypeScript', javascript_rows)
       @stdout.puts
       @stdout.puts footer(result, analysis)
       @stdout.puts 'fan_in is a static approximation — dynamic references (const_get, send, metaprogramming) ' \
@@ -402,10 +457,10 @@ module StudFinder
     end
 
     def footer(result, analysis)
-      parts = ["#{analysis.files.length} files analyzed."]
-      if analysis.skipped_files.any?
-        parts << "#{analysis.skipped_files.length} files skipped (parse errors — run --verbose to see)."
-      end
+      file_count = analysis.ruby.files.length + analysis.javascript.files.length
+      skipped_count = analysis.ruby.skipped_files.length + analysis.javascript.skipped_files.length
+      parts = ["#{file_count} files analyzed."]
+      parts << "#{skipped_count} files skipped (parse errors — run --verbose to see)." if skipped_count.positive?
       parts << "#{result.default_excluded_count} files excluded by default rules."
       parts.join(' ')
     end

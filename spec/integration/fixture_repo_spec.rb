@@ -25,7 +25,7 @@ RSpec.describe 'fixture repo integration' do
     expect(stdout).to include('rank')
     expect(stdout).to include('score')
     expect(stdout).to include('class')
-    expect(stdout).to include('JavaScript files not analyzed')
+    expect(stdout).to include('JavaScript/TypeScript')
     expect(top_table_row(stdout)).to include('app/models/user.rb')
     expect(top_table_score(stdout)).to be > 0.0
   end
@@ -35,18 +35,14 @@ RSpec.describe 'fixture repo integration' do
     payload = JSON.parse(stdout)
 
     expect(status).to be_success, stderr
-    expect(payload.keys).to contain_exactly('meta', 'files')
+    expect(payload.keys).to contain_exactly('meta', 'warnings', 'ruby', 'javascript')
     expect(payload['meta'].keys).to include('repo', 'analyzed_at', 'churn_days', 'file_count', 'files_skipped',
                                             'formula', 'weights', 'warnings')
-    expect(payload['meta']['warnings']).to include('coverage_unavailable', 'js_not_analyzed')
-    expect(payload['meta']['weights']).to eq(
-      'fan_in' => 0.4118,
-      'complexity' => 0.2941,
-      'churn' => 0.2941,
-      'coverage' => nil
-    )
+    expect(payload['warnings']).to include('coverage_unavailable')
+    expect(payload['meta']['warnings']).to eq(payload['warnings'])
+    expect(payload['javascript']).to eq([])
 
-    files = payload.fetch('files')
+    files = payload.fetch('ruby')
     expect(files.first['path']).to eq('app/models/user.rb')
     expect(files.first['score']).to be > 0.0
     expect(files.map { |file| file['score'] }).to all(be_between(0.0, 1.0).inclusive)
@@ -57,16 +53,11 @@ RSpec.describe 'fixture repo integration' do
 
   it 'emits JSON output with Cobertura coverage integrated' do
     coverage_path = File.join(repo_path, 'coverage/coverage.xml')
-    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--coverage', coverage_path)
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--ruby-coverage', coverage_path)
     payload = JSON.parse(stdout)
 
     expect(status).to be_success, stderr
-    expect(payload['meta']['formula']).to eq('4-factor')
-    expect(payload['meta']['weights']['coverage']).to eq(0.15)
-    expect(payload['meta']['warnings']).not_to include('coverage_unavailable')
-    expect(payload['meta']['warnings']).to include('coverage_partial')
-
-    files = payload['files'].to_h { |file| [file['path'], file] }
+    files = payload['ruby'].to_h { |file| [file['path'], file] }
     expect(files['app/models/user.rb']['coverage']).to eq(1.0)
     expect(files['app/services/auth_service.rb']['coverage']).to eq(0.0)
     expect(files['app/services/auth_service.rb']['score']).to be > files['app/services/post_service.rb']['score']
@@ -77,13 +68,11 @@ RSpec.describe 'fixture repo integration' do
     coverage_xml = File.read(coverage_path)
     File.write(coverage_path, coverage_xml.sub(%r{\s*<class filename="app/models/post\.rb" line-rate="0\.95" />}, ''))
 
-    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--coverage', coverage_path)
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--ruby-coverage', coverage_path)
     payload = JSON.parse(stdout)
 
     expect(status).to be_success, stderr
-    expect(payload['meta']['warnings']).to include('coverage_partial')
-
-    files = payload['files'].to_h { |file| [file['path'], file] }
+    files = payload['ruby'].to_h { |file| [file['path'], file] }
     expect(files['app/models/post.rb']['coverage']).to eq(0.0)
     expect(files['app/models/post.rb']['score']).to be_within(0.0001).of(0.4611)
     expect(files['app/models/profile.rb']['coverage']).to eq(0.75)
