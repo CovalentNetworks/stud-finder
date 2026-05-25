@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'set'
+
 module StudFinder
   module Coverage
     class Lcov
@@ -10,6 +12,7 @@ module StudFinder
       def initialize(path:, files:, project_root: nil)
         @path = path
         @files = files
+        @file_set = Set.new(files)
         @project_root = File.expand_path(project_root) if project_root
         @missing_files = []
       end
@@ -36,13 +39,33 @@ module StudFinder
 
       def normalize_filename(filename)
         expanded = File.expand_path(filename)
+        stripped = project_root_stripped(filename, expanded)
+        return stripped if stripped && @file_set.include?(stripped)
+
+        if filename.start_with?('/')
+          suffix_match(filename) || stripped || filename.delete_prefix('./')
+        else
+          stripped || filename.delete_prefix('./')
+        end
+      end
+
+      def project_root_stripped(filename, expanded)
         if @project_root && filename.start_with?("#{@project_root}/")
           filename.delete_prefix("#{@project_root}/")
         elsif @project_root && expanded.start_with?("#{@project_root}/")
           expanded.delete_prefix("#{@project_root}/")
-        else
-          filename.delete_prefix('./')
         end
+      end
+
+      def suffix_match(filename)
+        components = filename.split('/').reject(&:empty?)
+
+        1.upto(components.length) do |count|
+          suffix = components.last(count).join('/')
+          return suffix if @file_set.include?(suffix)
+        end
+
+        nil
       end
 
       def line_rate(record, filename)

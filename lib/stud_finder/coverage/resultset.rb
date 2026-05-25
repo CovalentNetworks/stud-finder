@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'set'
 
 module StudFinder
   module Coverage
@@ -12,6 +13,7 @@ module StudFinder
       def initialize(path:, files:, project_root: nil)
         @path = path
         @files = files
+        @file_set = Set.new(files)
         @project_root = File.expand_path(project_root) if project_root
         @missing_files = []
       end
@@ -65,11 +67,29 @@ module StudFinder
       end
 
       def normalize_filename(filename)
-        if @project_root && filename.start_with?("#{@project_root}/")
-          filename.delete_prefix("#{@project_root}/")
+        stripped = project_root_stripped(filename)
+        return stripped if stripped && @file_set.include?(stripped)
+
+        if filename.start_with?('/')
+          suffix_match(filename) || stripped || filename.delete_prefix('./')
         else
-          filename.delete_prefix('./')
+          stripped || filename.delete_prefix('./')
         end
+      end
+
+      def project_root_stripped(filename)
+        filename.delete_prefix("#{@project_root}/") if @project_root && filename.start_with?("#{@project_root}/")
+      end
+
+      def suffix_match(filename)
+        components = filename.split('/').reject(&:empty?)
+
+        1.upto(components.length) do |count|
+          suffix = components.last(count).join('/')
+          return suffix if @file_set.include?(suffix)
+        end
+
+        nil
       end
 
       def line_rate(lines)

@@ -72,6 +72,28 @@ RSpec.describe StudFinder::Coverage::Lcov do
     expect(coverage['app/javascript/components/Foo.jsx']).to eq(0.25)
   end
 
+  it 'maps absolute SF paths from another machine by walking suffixes' do
+    coverage = parse(<<~LCOV, files: ['app/models/user.rb'], project_root: '/home/fernando/Projects/covalent-ojt')
+      SF:/Users/fernandobaz/Desktop/covalent-ojt/app/models/user.rb
+      LF:3
+      LH:2
+      end_of_record
+    LCOV
+
+    expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+  end
+
+  it 'leaves unmatched absolute SF paths safely unmapped' do
+    coverage = parse(<<~LCOV, files: ['app/models/user.rb'])
+      SF:/Users/fernandobaz/Desktop/other-app/lib/tasks/report.rb
+      LF:2
+      LH:2
+      end_of_record
+    LCOV
+
+    expect(coverage['app/models/user.rb']).to eq(0.0)
+  end
+
   it 'strips the target project root from absolute SF paths' do
     Dir.mktmpdir do |root|
       coverage = parse(<<~LCOV, files: ['src/foo.js'], project_root: root)
