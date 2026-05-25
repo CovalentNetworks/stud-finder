@@ -82,6 +82,23 @@ RSpec.describe StudFinder::Coverage::Resultset do
     expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
   end
 
+  it 'uses the most specific suffix when absolute SimpleCov paths are ambiguous' do
+    coverage = parse_resultset(
+      {
+        'RSpec' => {
+          'coverage' => {
+            '/Users/fernandobaz/Desktop/covalent-ojt/app/models/user.rb' => { 'lines' => [nil, 1, 0, 1] }
+          }
+        }
+      },
+      files: ['user.rb', 'app/models/user.rb'],
+      project_root: '/home/fernando/Projects/covalent-ojt'
+    )
+
+    expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+    expect(coverage['user.rb']).to eq(0.0)
+  end
+
   it 'leaves unmatched absolute SimpleCov paths safely unmapped' do
     coverage = parse_resultset(
       {

@@ -60,7 +60,7 @@ module StudFinder
       def suffix_match(filename)
         components = filename.split('/').reject(&:empty?)
 
-        1.upto(components.length) do |count|
+        components.length.downto(1) do |count|
           suffix = components.last(count).join('/')
           return suffix if @file_set.include?(suffix)
         end

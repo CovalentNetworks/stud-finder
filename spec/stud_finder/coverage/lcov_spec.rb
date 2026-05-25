@@ -83,6 +83,22 @@ RSpec.describe StudFinder::Coverage::Lcov do
     expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
   end
 
+  it 'uses the most specific suffix when absolute SF paths are ambiguous' do
+    coverage = parse(
+      <<~LCOV,
+        SF:/Users/fernandobaz/Desktop/covalent-ojt/app/models/user.rb
+        LF:3
+        LH:2
+        end_of_record
+      LCOV
+      files: ['user.rb', 'app/models/user.rb'],
+      project_root: '/home/fernando/Projects/covalent-ojt'
+    )
+
+    expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+    expect(coverage['user.rb']).to eq(0.0)
+  end
+
   it 'leaves unmatched absolute SF paths safely unmapped' do
     coverage = parse(<<~LCOV, files: ['app/models/user.rb'])
       SF:/Users/fernandobaz/Desktop/other-app/lib/tasks/report.rb
