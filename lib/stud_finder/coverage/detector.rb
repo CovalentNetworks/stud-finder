@@ -15,11 +15,11 @@ module StudFinder
         '.json' => Resultset
       }.freeze
 
-      def self.for(path:, files:)
+      def self.for(path:, files:, repo_path: nil)
         parser = PARSERS[File.extname(path).downcase]
         raise Error, "Error: unsupported coverage file type: #{path}" if parser.nil?
 
-        parser.new(path: path, files: files)
+        parser.new(path: path, files: files, repo_path: repo_path)
       end
     end
   end
