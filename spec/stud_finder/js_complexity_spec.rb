@@ -57,6 +57,27 @@ RSpec.describe StudFinder::JsComplexity do
     end
   end
 
+  it 'parses ESLint JSON from expected violation exit status without warning' do
+    make_js_repo(%w[src/a.js]) do |root, files|
+      write_eslint(root, <<~SH)
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then echo v9.1.0; exit 0; fi
+        cat <<JSON
+        [{"filePath":"#{root}/src/a.js","messages":[
+          {"message":"Function has a complexity of 5. Maximum allowed is 0."}]}]
+        JSON
+        exit 1
+      SH
+      stderr = StringIO.new
+
+      result = call(root, files, stderr: stderr)
+
+      expect(result.counts).to eq('src/a.js' => 5)
+      expect(result.warnings).to be_empty
+      expect(stderr.string).not_to include('js_eslint_failed')
+    end
+  end
+
   it 'uses v9 flat config and deletes the temporary config' do
     make_repo do |root, files|
       args_file = File.join(root, 'args.txt')

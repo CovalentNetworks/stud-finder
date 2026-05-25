@@ -101,7 +101,7 @@ module StudFinder
       stdout, _stderr, status = Timeout.timeout(@js_timeout) do
         Open3.capture3(*args, chdir: @repo_path)
       end
-      return degraded_batch(batch, ESLINT_FAILED) unless status.success?
+      return degraded_batch(batch, ESLINT_FAILED) if status.exitstatus == 2
 
       parse_output(stdout, batch)
     rescue Timeout::Error
