@@ -69,6 +69,21 @@ RSpec.describe StudFinder::FileCollector do
     end
   end
 
+  it 'excludes top-level and nested node_modules JavaScript files by default' do
+    make_repo do |root|
+      %w[src/a.js src/b.js src/c.js src/d.js src/e.js].each do |file|
+        write_file(root, file, 'export const value = 1;')
+      end
+      write_file(root, 'node_modules/react/index.js', 'module.exports = {};')
+      write_file(root, 'packages/app/node_modules/vue/index.js', 'module.exports = {};')
+
+      result = collect(root)
+
+      expect(result.files).to contain_exactly('src/a.js', 'src/b.js', 'src/c.js', 'src/d.js', 'src/e.js')
+      expect(result.default_excluded_count).to eq(2)
+    end
+  end
+
   it 'includes JavaScript and TypeScript files with language tags and default test excludes' do
     make_repo do |root|
       %w[app/models/user.rb app/models/account.rb app/javascript/a.js app/javascript/b.jsx app/javascript/c.ts
