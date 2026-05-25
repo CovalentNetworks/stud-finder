@@ -18,9 +18,12 @@ module StudFinder
   class CLI
     OUTPUT_FORMATS = %w[table json markdown csv].freeze
     RESULT_COLUMNS = %w[
-      rank file score class fan_in fan_in_pct complexity complexity_pct churn_commits churn_lines churn_pct coverage
+      rank language file score class fan_in fan_in_pct complexity complexity_pct churn_commits churn_lines churn_pct
+      coverage
     ].freeze
-    MARKDOWN_COLUMNS = %w[rank file score class fan_in complexity churn_commits churn_lines churn_pct coverage].freeze
+    MARKDOWN_COLUMNS = %w[
+      rank language file score class fan_in complexity churn_commits churn_lines churn_pct coverage
+    ].freeze
     WEIGHT_KEYS = %i[fan_in complexity churn coverage].freeze
     DEFAULT_OPTIONS = {
       output: 'table',
@@ -221,7 +224,7 @@ module StudFinder
       js_files = files.select { |file| %i[javascript typescript].include?(languages[file]) }
 
       ruby_analysis = ruby_files.empty? ? empty_analysis : analyze_ruby(path, ruby_files)
-      javascript_analysis = js_files.empty? ? empty_analysis : analyze_javascript(path, js_files)
+      javascript_analysis = js_files.empty? ? empty_analysis : analyze_javascript(path, js_files, languages)
 
       progress('done')
       Report.new(ruby: ruby_analysis, javascript: javascript_analysis,
@@ -241,21 +244,23 @@ module StudFinder
                                stderr: @stderr).call
 
       score_group(analysis_files, fan_in_result.counts, complexity_result.counts, churn_result,
-                  complexity_result.skipped_files, ruby_coverage(path, analysis_files))
+                  complexity_result.skipped_files, ruby_coverage(path, analysis_files),
+                  language_by_file: analysis_files.to_h { |file| [file, :ruby] })
     end
 
-    def analyze_javascript(path, files)
+    def analyze_javascript(path, files, languages)
       progress('computing JavaScript fan_in (dependency-cruiser)...')
       fan_in_result = JsFanIn.new(repo_path: path, files: files, js_timeout: @options[:js_timeout],
                                   stderr: @stderr).call
       churn_result = Churn.new(repo_path: path, files: files, days: @options[:churn_days], stderr: @stderr).call
       complexity = files.to_h { |file| [file, 0] }
       score_group(files, fan_in_result.counts, complexity, churn_result, [], nil,
-                  extra_warnings: fan_in_result.warnings)
+                  language_by_file: languages, extra_warnings: fan_in_result.warnings)
     end
 
     # rubocop:disable Metrics/ParameterLists
-    def score_group(files, fan_in, complexity, churn_result, skipped_files, coverage_payload, extra_warnings: [])
+    def score_group(files, fan_in, complexity, churn_result, skipped_files, coverage_payload, language_by_file: {},
+                    extra_warnings: [])
       progress("normalizing + scoring #{files.length} files...")
       coverage_result, coverage_parser = coverage_payload
       scorer = Scorer.new(files: files, fan_in: fan_in, complexity: complexity, churn: churn_result.counts,
@@ -272,10 +277,14 @@ module StudFinder
         files: files, fan_in: fan_in, complexity: complexity, churn_commits: churn_result.churn_commits,
         churn_lines: churn_result.churn_lines, coverage: coverage_result,
         coverage_available: !coverage_result.nil?, skipped_files: skipped_files, warnings: warnings.uniq,
-        rows: scorer.call, weights: scorer.normalized_weights
+        rows: scorer.call.map { |row| with_language(row, language_by_file) }, weights: scorer.normalized_weights
       )
     end
     # rubocop:enable Metrics/ParameterLists
+
+    def with_language(row, language_by_file)
+      row.merge(language: language_by_file.fetch(row[:path]).to_s)
+    end
 
     def ruby_coverage(_path, files)
       return [nil, nil] unless coverage_available?
@@ -328,8 +337,8 @@ module StudFinder
 
     def emit_table_section(title, rows)
       @stdout.puts title
-      @stdout.puts ' rank  file                                            score  class   fan_in  complexity  ' \
-                   'churn_commits  churn_lines  churn_pct  coverage'
+      @stdout.puts ' rank  language    file                                            score  class   fan_in  ' \
+                   'complexity  churn_commits  churn_lines  churn_pct  coverage'
       rows.each { |row| @stdout.puts table_row(row) }
       @stdout.puts
     end
@@ -377,8 +386,9 @@ module StudFinder
 
     def markdown_row(row)
       values = [
-        row[:rank], row[:path], format_score(row[:score]), row[:classification], row[:fan_in], row[:complexity],
-        row[:churn_commits], row[:churn_lines], format_score(row[:churn_pct]), format_coverage(row[:coverage])
+        row[:rank], row[:language], row[:path], format_score(row[:score]), row[:classification], row[:fan_in],
+        row[:complexity], row[:churn_commits], row[:churn_lines], format_score(row[:churn_pct]),
+        format_coverage(row[:coverage])
       ]
       "| #{values.join(' | ')} |"
     end
@@ -402,6 +412,7 @@ module StudFinder
     def json_file(row)
       {
         rank: row[:rank],
+        language: row[:language],
         path: row[:path],
         score: row[:score],
         class: row[:classification],
@@ -419,6 +430,7 @@ module StudFinder
     def csv_file(row)
       [
         row[:rank],
+        row[:language],
         row[:path],
         format_score(row[:score]),
         row[:classification],
@@ -476,9 +488,9 @@ module StudFinder
     end
 
     def table_row(row)
-      format('%<rank>5d  %<path>-45s  %<score>6s  %<classification>-6s  %<fan_in>6d  %<complexity>10d  ' \
-             '%<churn_commits>13d  %<churn_lines>11d  %<churn_pct>9s  %<coverage>8s',
-             rank: row[:rank], path: row[:path], score: format_score(row[:score]),
+      format('%<rank>5d  %<language>-10s  %<path>-45s  %<score>6s  %<classification>-6s  %<fan_in>6d  ' \
+             '%<complexity>10d  %<churn_commits>13d  %<churn_lines>11d  %<churn_pct>9s  %<coverage>8s',
+             rank: row[:rank], language: row[:language], path: row[:path], score: format_score(row[:score]),
              classification: row[:classification], fan_in: row[:fan_in], complexity: row[:complexity],
              churn_commits: row[:churn_commits], churn_lines: row[:churn_lines],
              churn_pct: format_score(row[:churn_pct]), coverage: format_coverage(row[:coverage]))
