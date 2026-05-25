@@ -9,6 +9,8 @@ module StudFinder
     Result = Struct.new(:counts, :warnings, keyword_init: true)
 
     ESLINT_MISSING = 'js_eslint_missing'
+    ESLINT_FAILED = 'js_eslint_failed'
+    ESLINT_MALFORMED = 'js_eslint_malformed'
     TS_PARSER_MISSING = 'js_ts_parser_missing'
     TIMEOUT = 'js_eslint_timeout'
     BATCH_SIZE = 500
@@ -96,13 +98,14 @@ module StudFinder
       args.push('--rule', '{"complexity":["error",0]}', '--format', 'json')
       args.concat(batch)
 
-      stdout = Timeout.timeout(@js_timeout) do
-        Open3.capture3(*args, chdir: @repo_path).first
+      stdout, _stderr, status = Timeout.timeout(@js_timeout) do
+        Open3.capture3(*args, chdir: @repo_path)
       end
-      parse_output(stdout)
+      return degraded_batch(batch, ESLINT_FAILED) unless status.success?
+
+      parse_output(stdout, batch)
     rescue Timeout::Error
-      warn_once(TIMEOUT)
-      batch.to_h { |file| [file, 0] }
+      degraded_batch(batch, TIMEOUT)
     ensure
       File.delete(temp_config) if temp_config && File.exist?(temp_config)
     end
@@ -137,16 +140,19 @@ module StudFinder
       path
     end
 
-    def parse_output(stdout)
-      return parse_json(stdout) if stdout.strip.start_with?('[')
+    def parse_output(stdout, batch)
+      return degraded_batch(batch, ESLINT_MALFORMED) unless stdout.strip.start_with?('[')
 
-      parse_text(stdout)
-    rescue JSON::ParserError
-      parse_text(stdout)
+      parse_json(stdout)
+    rescue JSON::ParserError, KeyError, NoMethodError, TypeError
+      degraded_batch(batch, ESLINT_MALFORMED)
     end
 
     def parse_json(stdout)
-      JSON.parse(stdout).each_with_object({}) do |file_result, counts|
+      payload = JSON.parse(stdout)
+      raise TypeError, 'expected ESLint JSON array' unless payload.is_a?(Array)
+
+      payload.each_with_object({}) do |file_result, counts|
         file = normalize_path(file_result.fetch('filePath'))
         complexities = Array(file_result['messages']).filter_map do |message|
           message['message'].to_s[/complexity of (\d+)/, 1]&.to_i
@@ -176,6 +182,11 @@ module StudFinder
     def missing_eslint
       warn_once(ESLINT_MISSING)
       Result.new(counts: zero_counts, warnings: @warnings)
+    end
+
+    def degraded_batch(batch, code)
+      warn_once(code)
+      batch.to_h { |file| [file, 0] }
     end
 
     def zero_counts

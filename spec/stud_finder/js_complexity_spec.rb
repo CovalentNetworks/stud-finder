@@ -12,6 +12,13 @@ RSpec.describe StudFinder::JsComplexity do
     end
   end
 
+  def make_js_repo(files = %w[src/a.js src/b.js])
+    Dir.mktmpdir do |dir|
+      files.each { |file| write_file(dir, file, '') }
+      yield dir, files
+    end
+  end
+
   def write_file(root, relative, content)
     path = File.join(root, relative)
     FileUtils.mkdir_p(File.dirname(path))
@@ -137,6 +144,47 @@ RSpec.describe StudFinder::JsComplexity do
 
       expect(result.counts.values).to all(eq(0))
       expect(result.warnings).to include('js_eslint_timeout')
+    end
+  end
+
+  it 'warns and zeros the affected batch when ESLint exits non-zero with stderr only' do
+    make_js_repo do |root, files|
+      write_eslint(root, <<~SH)
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then echo v9.1.0; exit 0; fi
+        echo 'fatal eslint failure' >&2
+        exit 2
+      SH
+      stderr = StringIO.new
+
+      result = call(root, files, stderr: stderr)
+
+      expect(result.counts).to eq('src/a.js' => 0, 'src/b.js' => 0)
+      expect(result.warnings).to eq(['js_eslint_failed'])
+      expect(stderr.string).to include('js_eslint_failed')
+    end
+  end
+
+  it 'warns and zeros malformed ESLint JSON output while continuing later batches' do
+    Dir.mktmpdir do |root|
+      files = 501.times.map { |i| "src/file#{i}.js" }
+      files.each { |file| write_file(root, file, '') }
+      counter = File.join(root, 'count.txt')
+      write_eslint(root, <<~SH)
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then echo v9.1.0; exit 0; fi
+        count=0; [ -f #{counter} ] && count=$(cat #{counter}); count=$((count + 1)); echo $count > #{counter}
+        if [ "$count" = "1" ]; then echo '[not json'; exit 0; fi
+        echo '[{"filePath":"#{root}/src/file500.js","messages":[{"message":"Function has a complexity of 6. Maximum allowed is 0."}]}]'
+      SH
+      stderr = StringIO.new
+
+      result = call(root, files, stderr: stderr)
+
+      expect(result.counts['src/file0.js']).to eq(0)
+      expect(result.counts['src/file500.js']).to eq(6)
+      expect(result.warnings).to eq(['js_eslint_malformed'])
+      expect(stderr.string).to include('js_eslint_malformed')
     end
   end
 
