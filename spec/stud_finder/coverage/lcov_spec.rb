@@ -12,9 +12,9 @@ RSpec.describe StudFinder::Coverage::Lcov do
     file.path
   end
 
-  def parse(content, files: %w[app/models/user.rb app/models/post.rb], repo_path: nil)
+  def parse(content, files: %w[app/models/user.rb app/models/post.rb], project_root: nil)
     path = write_report(content)
-    described_class.new(path: path, files: files, repo_path: repo_path).call
+    described_class.new(path: path, files: files, project_root: project_root).call
   ensure
     FileUtils.rm_f(path) if path
   end
@@ -74,7 +74,7 @@ RSpec.describe StudFinder::Coverage::Lcov do
 
   it 'strips the target project root from absolute SF paths' do
     Dir.mktmpdir do |root|
-      coverage = parse(<<~LCOV, files: ['src/foo.js'], repo_path: root)
+      coverage = parse(<<~LCOV, files: ['src/foo.js'], project_root: root)
         SF:#{root}/src/foo.js
         LF:8
         LH:6

@@ -9,10 +9,10 @@ module StudFinder
 
       attr_reader :missing_files
 
-      def initialize(path:, files:, repo_path: nil)
+      def initialize(path:, files:, project_root: nil)
         @path = path
         @files = files
-        @repo_path = repo_path
+        @project_root = File.expand_path(project_root) if project_root
         @missing_files = []
       end
 
@@ -65,7 +65,11 @@ module StudFinder
       end
 
       def normalize_filename(filename)
-        filename.delete_prefix('./')
+        if @project_root && filename.start_with?("#{@project_root}/")
+          filename.delete_prefix("#{@project_root}/")
+        else
+          filename.delete_prefix('./')
+        end
       end
 
       def line_rate(lines)

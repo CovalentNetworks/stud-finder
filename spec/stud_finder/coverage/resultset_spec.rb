@@ -13,9 +13,9 @@ RSpec.describe StudFinder::Coverage::Resultset do
     file.path
   end
 
-  def parse_resultset(payload, files: %w[app/models/user.rb app/models/post.rb])
+  def parse_resultset(payload, files: %w[app/models/user.rb app/models/post.rb], project_root: nil)
     path = write_report(payload)
-    described_class.new(path: path, files: files).call
+    described_class.new(path: path, files: files, project_root: project_root).call
   ensure
     FileUtils.rm_f(path) if path
   end
@@ -46,6 +46,24 @@ RSpec.describe StudFinder::Coverage::Resultset do
     )
 
     expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+  end
+
+  it 'strips the target project root from absolute SimpleCov paths' do
+    Dir.mktmpdir do |root|
+      coverage = parse_resultset(
+        {
+          'RSpec' => {
+            'coverage' => {
+              File.join(root, 'app/models/user.rb') => { 'lines' => [nil, 1, 0, 1] }
+            }
+          }
+        },
+        files: ['app/models/user.rb'],
+        project_root: root
+      )
+
+      expect(coverage['app/models/user.rb']).to eq(2.0 / 3.0)
+    end
   end
 
   it 'maps files absent from the resultset to 0.0 coverage' do

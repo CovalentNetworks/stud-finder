@@ -25,6 +25,12 @@ RSpec.describe StudFinder::Coverage::Detector do
     expect(parser).to be_a(StudFinder::Coverage::Resultset)
   end
 
+  it 'passes the project root to coverage parsers' do
+    parser = described_class.for(path: 'resultset.json', files: [], project_root: '/repo')
+
+    expect(parser.instance_variable_get(:@project_root)).to eq('/repo')
+  end
+
   it 'rejects unsupported coverage file types' do
     expect { described_class.for(path: 'coverage.txt', files: []) }
       .to raise_error(StudFinder::Coverage::Detector::Error, /unsupported coverage file type/)
