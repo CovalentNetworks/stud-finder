@@ -8,6 +8,7 @@ module StudFinder
     DEFAULT_EXCLUDES = [
       'db/schema.rb',
       'db/migrate/**',
+      'node_modules/**',
       '**/node_modules/**',
       'vendor/**',
       '**/*.min.js',
@@ -126,7 +127,15 @@ module StudFinder
 
     def glob_match?(pattern, relative)
       File.fnmatch(pattern, relative, FNM_FLAGS) ||
+        globstar_directory_match?(pattern, relative) ||
         (pattern.end_with?('/**') && relative.start_with?("#{pattern.delete_suffix('/**')}/"))
+    end
+
+    def globstar_directory_match?(pattern, relative)
+      return false unless pattern.start_with?('**/') && pattern.end_with?('/**')
+
+      directory = pattern.delete_prefix('**/').delete_suffix('/**')
+      relative.start_with?("#{directory}/") || relative.include?("/#{directory}/")
     end
 
     def auto_generated?(file)

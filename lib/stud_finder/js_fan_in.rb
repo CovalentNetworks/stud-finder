@@ -46,10 +46,8 @@ module StudFinder
     end
 
     def depcruise_binary
-      Dir.chdir(@repo_path) do
-        local = 'node_modules/.bin/depcruise'
-        return local if File.executable?(local)
-      end
+      local = File.join(@repo_path, 'node_modules/.bin/depcruise')
+      return local if File.executable?(local)
 
       ENV.fetch('PATH', '').split(File::PATH_SEPARATOR).each do |dir|
         candidate = File.join(dir, 'depcruise')
@@ -61,9 +59,7 @@ module StudFinder
 
     def run_depcruise(depcruise)
       Timeout.timeout(@js_timeout) do
-        Dir.chdir(@repo_path) do
-          Open3.capture3(depcruise, '--output-type', 'json', '.')
-        end
+        Open3.capture3(depcruise, '--output-type', 'json', '.', chdir: @repo_path)
       end
     end
 

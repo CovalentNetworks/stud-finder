@@ -54,6 +54,43 @@ RSpec.describe StudFinder::JsFanIn do
     end
   end
 
+  it 'probes dependency-cruiser in the target project node_modules' do
+    make_repo do |root|
+      files = %w[src/a.js src/b.js]
+      status = instance_double(Process::Status, success?: true)
+      allow(Open3).to receive(:capture3).with('node', '--version').and_return(['v24.0.0', '', status])
+      allow(File).to receive(:executable?).and_call_original
+      expect(File).to receive(:executable?).with(File.join(root, 'node_modules/.bin/depcruise')).and_return(false)
+      original_path = ENV.fetch('PATH', nil)
+      ENV['PATH'] = ''
+
+      result = call(root, files)
+
+      expect(result.warnings).to eq(['js_tools_missing'])
+    ensure
+      ENV['PATH'] = original_path
+    end
+  end
+
+  it 'runs dependency-cruiser from the target project directory' do
+    make_repo do |root|
+      files = %w[src/a.js src/b.js]
+      files.each { |file| write_file(root, file) }
+      write_depcruise(root, "#!/bin/sh\nexit 0\n")
+      status = instance_double(Process::Status, success?: true)
+      depcruise = File.join(root, 'node_modules/.bin/depcruise')
+      allow(Open3).to receive(:capture3).with('node', '--version').and_return(['v24.0.0', '', status])
+      expect(Open3).to receive(:capture3)
+        .with(depcruise, '--output-type', 'json', '.', chdir: root)
+        .and_return(['{"modules":[]}', '', status])
+
+      result = call(root, files)
+
+      expect(result.warnings).to eq([])
+      expect(result.counts).to eq('src/a.js' => 0, 'src/b.js' => 0)
+    end
+  end
+
   it 'degrades when node is missing' do
     make_repo do |root|
       files = %w[src/a.js src/b.js]
