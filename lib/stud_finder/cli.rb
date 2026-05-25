@@ -341,11 +341,26 @@ module StudFinder
       end
     end
 
-    def emit_json(_path, _analysis, ruby_rows, javascript_rows)
+    def emit_json(path, analysis, ruby_rows, javascript_rows)
       @stdout.puts JSON.generate(
+        meta: json_meta(path, analysis),
+        warnings: analysis.warnings,
         ruby: ruby_rows.map { |row| json_file(row) },
         javascript: javascript_rows.map { |row| json_file(row) }
       )
+    end
+
+    def json_meta(path, analysis)
+      {
+        repo: path,
+        analyzed_at: Time.now.utc.iso8601,
+        churn_days: @options[:churn_days],
+        file_count: analysis.ruby.files.length + analysis.javascript.files.length,
+        files_skipped: analysis.ruby.skipped_files.length + analysis.javascript.skipped_files.length,
+        formula: analysis.ruby.coverage_available ? '4-factor' : '3-factor (no coverage)',
+        weights: json_weights(analysis.ruby.weights || analysis.javascript.weights),
+        warnings: analysis.warnings
+      }
     end
 
     def emit_markdown(analysis, ruby_rows, javascript_rows)

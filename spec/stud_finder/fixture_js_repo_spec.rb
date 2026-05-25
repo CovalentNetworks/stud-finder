@@ -29,7 +29,8 @@ RSpec.describe 'JavaScript fixture repo integration' do
     payload = JSON.parse(stdout)
 
     expect(status).to be_success, stderr
-    expect(payload.keys).to contain_exactly('ruby', 'javascript')
+    expect(payload.keys).to contain_exactly('meta', 'warnings', 'ruby', 'javascript')
+    expect(payload['warnings']).to include('coverage_unavailable')
     expect(payload.fetch('ruby')).to eq([])
     expect(payload.fetch('javascript').first['path']).to eq('src/hub.js')
     expect(payload.fetch('javascript').first['fan_in']).to eq(3)

@@ -35,7 +35,11 @@ RSpec.describe 'fixture repo integration' do
     payload = JSON.parse(stdout)
 
     expect(status).to be_success, stderr
-    expect(payload.keys).to contain_exactly('ruby', 'javascript')
+    expect(payload.keys).to contain_exactly('meta', 'warnings', 'ruby', 'javascript')
+    expect(payload['meta'].keys).to include('repo', 'analyzed_at', 'churn_days', 'file_count', 'files_skipped',
+                                            'formula', 'weights', 'warnings')
+    expect(payload['warnings']).to include('coverage_unavailable')
+    expect(payload['meta']['warnings']).to eq(payload['warnings'])
     expect(payload['javascript']).to eq([])
 
     files = payload.fetch('ruby')
