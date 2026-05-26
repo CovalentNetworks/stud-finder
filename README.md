@@ -149,4 +149,4 @@ Don't run it as a gate — risk isn't a binary blocker. Run it as input to human
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).
