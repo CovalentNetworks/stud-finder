@@ -19,7 +19,7 @@ stud-finder surfaces them before you touch them.
 stud-finder analyzes a codebase and produces a ranked list of every file, scored by structural risk. Run it before a sprint, before a refactor, before a code review. Know which files deserve extra attention before anyone writes a line.
 
 ```
-$ stud-finder analyze ./my-rails-app
+$ stud-finder ./my-rails-app
 
 FILE                              SCORE  LABEL   FAN_IN  COMPLEXITY  CHURN_COMMITS  CHURN_LINES  CHURN_PCT  COVERAGE
 app/models/user.rb                0.91   trunk   0.97    0.42        0.88           0.91         0.89       0.14
@@ -120,7 +120,7 @@ score = 0.35 × fan_in_pct + 0.25 × complexity_pct + 0.25 × churn_pct + 0.15 �
 - **Static analysis:** RuboCop (complexity), Zeitwerk + custom AST (fan_in), git log (churn)
 - **Coverage formats:** Cobertura XML, LCOV, SimpleCov JSON — auto-detected
 - **Output formats:** table (default), JSON, CSV, Markdown
-- **Configuration:** YAML file or CLI flags for weights, thresholds, excludes, churn window
+- **Configuration:** CLI flags for weights, thresholds, excludes, churn window
 - **Requires:** Ruby, RuboCop, git. Nothing else for Ruby analysis.
 
 ---
