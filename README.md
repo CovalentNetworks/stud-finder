@@ -72,11 +72,13 @@ Each file is scored on up to four independently measured signals. See [PRODUCT.m
 
 When coverage isn't available, the remaining three signals re-normalize to 100% automatically (3-factor mode).
 
-Files are classified into three labels by score:
+Files are classified into three labels based on their **fan_in percentile** (not the total score):
 
-- **trunk** — load-bearing. High review bar, change with care.
-- **branch** — meaningful coupling. Worth a second look.
-- **leaf** — isolated. Lower risk. Move fast here.
+- **trunk** — fan_in in the top 15% (default `trunk_threshold: 85`). Load-bearing. High review bar, change with care.
+- **branch** — fan_in between the 50th and 85th percentile (default `branch_threshold: 50`). Meaningful coupling.
+- **leaf** — everything below the 50th percentile. Isolated. Move fast here.
+
+The total score still drives the ranking. The class label is a separate coupling-based signal.
 
 ---
 
@@ -106,9 +108,9 @@ Each language gets its own ranking section in the output — Ruby and JS are not
 | `--coverage PATH` | Deprecated alias for `--ruby-coverage` |
 | `--js-timeout N` | dependency-cruiser timeout in seconds (default: 60) |
 | `--churn-days N` | Commit lookback window in days (default: 180) |
-| `--weights WEIGHTS` | Custom weights, e.g. `fan_in:40,complexity:30,churn:20,coverage:10` |
-| `--trunk-threshold N` | Score >= N → trunk label (default: 0.70) |
-| `--branch-threshold N` | Score >= N → branch label (default: 0.40) |
+| `--weights WEIGHTS` | Custom weights as fractions, e.g. `fan_in:0.35,complexity:0.25,churn:0.25,coverage:0.15`. Defaults shown. |
+| `--trunk-threshold N` | fan_in percentile cutoff for trunk classification (default: 85) |
+| `--branch-threshold N` | fan_in percentile cutoff for branch classification (default: 50) |
 | `--exclude PATTERN` | Exclude glob pattern (repeatable). `spec/` and `test/` excluded by default. |
 | `--top N` | Emit only the top N results |
 | `--min-files N` | Advisory minimum file count to trust percentiles (default: 20) |
@@ -147,4 +149,4 @@ Don't run it as a gate — risk isn't a binary blocker. Run it as input to human
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT.
