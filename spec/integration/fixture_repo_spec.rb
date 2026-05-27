@@ -90,6 +90,40 @@ RSpec.describe 'fixture repo integration' do
     expect(stdout).to include('| 1 | ruby | app/models/user.rb |')
   end
 
+  it 'filters output to files changed vs --diff-base, preserving full-repo rank and score' do
+    system('git', '-C', repo_path, 'branch', 'base')
+    File.open(File.join(repo_path, 'app/models/post.rb'), 'a') { |file| file.puts "\n# edit" }
+    system('git', '-C', repo_path, 'add', 'app/models/post.rb')
+    system('git', '-C', repo_path, 'commit', '-qm', 'edit post')
+
+    full = JSON.parse(run_cli('--min-files', '5', '--output', 'json').first)
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json', '--diff-base', 'base')
+    filtered = JSON.parse(stdout)
+
+    expect(status).to be_success, stderr
+    emitted = (filtered['ruby'] + filtered['javascript']).map { |file| file['path'] }
+    expect(emitted).to contain_exactly('app/models/post.rb')
+
+    full_post = full['ruby'].find { |file| file['path'] == 'app/models/post.rb' }
+    filtered_post = filtered['ruby'].first
+    expect(filtered_post['rank']).to eq(full_post['rank'])
+    expect(filtered_post['score']).to eq(full_post['score'])
+    expect(filtered['meta']['filtered']).to be(true)
+    expect(filtered['meta']['diff_base']).to eq('base')
+  end
+
+  it 'filters output to explicit --only paths' do
+    stdout, stderr, status = run_cli('--min-files', '5', '--output', 'json',
+                                     '--only', 'app/models/user.rb,app/models/post.rb')
+    payload = JSON.parse(stdout)
+
+    expect(status).to be_success, stderr
+    expect(payload['ruby'].map { |file| file['path'] }).to contain_exactly('app/models/user.rb',
+                                                                           'app/models/post.rb')
+    expect(payload['meta']['filtered']).to be(true)
+    expect(payload['meta']).not_to have_key('diff_base')
+  end
+
   def run_cli(*args)
     Open3.capture3('bundle', 'exec', 'ruby', bin_path, repo_path, *args)
   end

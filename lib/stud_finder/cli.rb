@@ -3,9 +3,11 @@
 require 'csv'
 require 'json'
 require 'optparse'
+require 'set'
 require 'time'
 require_relative 'churn'
 require_relative 'complexity'
+require_relative 'diff'
 require_relative 'coverage/detector'
 require_relative 'fan_in'
 require_relative 'js_fan_in'
@@ -40,6 +42,9 @@ module StudFinder
       ruby_coverage_path: nil,
       js_coverage_path: nil,
       js_timeout: 60,
+      diff_base: nil,
+      only_paths: nil,
+      filter_set: nil,
       cli_warnings: []
     }.freeze
 
@@ -76,12 +81,14 @@ module StudFinder
       ).collect
       progress("collecting files... #{result.files.length} found")
 
+      @options[:filter_set] = resolve_filter_set(File.expand_path(path))
+
       analysis = analyze(File.expand_path(path), result.files, result.languages)
       emit_results(File.expand_path(path), result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
            FileCollector::Error, Churn::Error, Complexity::Error, Coverage::Cobertura::Error, Coverage::Detector::Error,
-           Coverage::Lcov::Error, Coverage::Resultset::Error, Scorer::ValidationError => e
+           Coverage::Lcov::Error, Coverage::Resultset::Error, Diff::Error, Scorer::ValidationError => e
       @stderr.puts e.message
       1
     end
@@ -137,6 +144,14 @@ module StudFinder
         opts.on('--top N', Integer, 'Emit only the top N results') do |value|
           @options[:top] = value
         end
+        opts.on('--diff-base REF',
+                'Score the full repo but emit only files changed vs REF (merge-base), e.g. origin/staging') do |value|
+          @options[:diff_base] = value
+        end
+        opts.on('--only PATHS',
+                'Emit only these comma-separated repo-relative paths (still scored against the full repo)') do |value|
+          @options[:only_paths] = value.split(',').map(&:strip).reject(&:empty?)
+        end
         opts.on('--verbose', 'Print suppressed per-file warnings to stderr') do
           @options[:verbose] = true
         end
@@ -186,15 +201,26 @@ module StudFinder
       raise ValidationError, 'Error: --min-files must be positive.' if @options[:min_files] <= 0
       raise ValidationError, 'Error: --top must be positive.' if @options[:top] && @options[:top] <= 0
       raise ValidationError, 'Error: --churn-days must be positive.' if @options[:churn_days] <= 0
+      raise ValidationError, 'Error: --js-timeout must be positive.' if @options[:js_timeout] <= 0
+
+      validate_coverage_paths!
+      validate_filter_options!
+      validate_weights! if @options[:custom_weights]
+    end
+
+    def validate_coverage_paths!
       if @options[:ruby_coverage_path] && !File.file?(@options[:ruby_coverage_path])
         raise ValidationError, "Error: coverage file not found: #{@options[:ruby_coverage_path]}"
       end
-      if @options[:js_coverage_path] && !File.file?(@options[:js_coverage_path])
-        raise ValidationError, "Error: JS coverage file not found: #{@options[:js_coverage_path]}"
-      end
-      raise ValidationError, 'Error: --js-timeout must be positive.' if @options[:js_timeout] <= 0
+      return unless @options[:js_coverage_path] && !File.file?(@options[:js_coverage_path])
 
-      validate_weights! if @options[:custom_weights]
+      raise ValidationError, "Error: JS coverage file not found: #{@options[:js_coverage_path]}"
+    end
+
+    def validate_filter_options!
+      return unless @options[:diff_base] && @options[:only_paths]
+
+      raise ValidationError, 'Error: --diff-base and --only are mutually exclusive.'
     end
 
     def validate_threshold!(name)
@@ -327,8 +353,32 @@ module StudFinder
       end
     end
 
+    # Resolves the optional output filter to a Set of repo-relative paths, or nil.
+    # The filter is applied at emit time only (see #limited_rows) so the full repo
+    # is still scored — fan_in counts and percentiles stay correct.
+    def resolve_filter_set(path)
+      paths =
+        if @options[:diff_base]
+          Diff.new(repo_path: path, base_ref: @options[:diff_base]).changed_paths
+        else
+          @options[:only_paths]
+        end
+      paths && Set.new(paths)
+    end
+
     def limited_rows(rows)
-      @options[:top] ? rows.first(@options[:top]) : rows
+      filtered = @options[:filter_set] ? rows.select { |row| @options[:filter_set].include?(row[:path]) } : rows
+      @options[:top] ? filtered.first(@options[:top]) : filtered
+    end
+
+    def filter_note
+      return unless @options[:filter_set]
+
+      if @options[:diff_base]
+        "Filtered to files changed vs #{@options[:diff_base]} (ranks are against the full repo)."
+      else
+        'Filtered to --only paths (ranks are against the full repo).'
+      end
     end
 
     def empty_analysis
@@ -370,7 +420,7 @@ module StudFinder
     end
 
     def json_meta(path, analysis)
-      {
+      meta = {
         repo: path,
         analyzed_at: Time.now.utc.iso8601,
         churn_days: @options[:churn_days],
@@ -380,6 +430,9 @@ module StudFinder
         weights: json_weights(analysis.ruby.weights || analysis.javascript.weights),
         warnings: analysis.warnings
       }
+      meta[:filtered] = true if @options[:filter_set]
+      meta[:diff_base] = @options[:diff_base] if @options[:diff_base]
+      meta
     end
 
     def emit_markdown(analysis, ruby_rows, javascript_rows)
@@ -388,6 +441,11 @@ module StudFinder
       file_count = analysis.ruby.files.length + analysis.javascript.files.length
       @stdout.puts "> #{report_coverage_available?(analysis) ? '4-factor score' : '3-factor score (no coverage)'}. " \
                    "Churn window: #{@options[:churn_days]} days. #{file_count} files analyzed."
+      note = filter_note
+      if note
+        @stdout.puts
+        @stdout.puts "> #{note}"
+      end
       emit_markdown_section('Ruby', ruby_rows)
       emit_markdown_section('JavaScript/TypeScript', javascript_rows)
       @stdout.puts
@@ -411,6 +469,8 @@ module StudFinder
         @stdout.puts scoring_note(weights: analysis.ruby.weights || analysis.javascript.weights,
                                   stderr: false)
       end
+      note = filter_note
+      @stdout.puts note if note
       @stdout.puts
       emit_table_section('Ruby', ruby_rows)
       emit_table_section('JavaScript/TypeScript', javascript_rows)

@@ -339,6 +339,22 @@ RSpec.describe StudFinder::CLI do
     expect(stderr).to include("Error: coverage file not found: #{missing}")
   end
 
+  it 'rejects --diff-base combined with --only' do
+    status, _stdout, stderr = run_cli(['--diff-base', 'origin/staging', '--only', 'app/models/user.rb'])
+
+    expect(status).to eq(1)
+    expect(stderr).to include('--diff-base and --only are mutually exclusive')
+  end
+
+  it 'exits with a clear error when the --diff-base ref is unknown' do
+    make_repo(file_count: 5) do |root|
+      status, _stdout, stderr = run_cli([root, '--min-files', '5', '--diff-base', 'origin/missing-branch'])
+
+      expect(status).to eq(1)
+      expect(stderr).to include('diff base ref not found')
+    end
+  end
+
   it 'accepts positive coverage weight when --coverage is provided' do
     make_repo(file_count: 5) do |root|
       coverage_path = File.join(root, 'coverage.xml')
