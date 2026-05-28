@@ -16,6 +16,10 @@ module StudFinder
       @base_ref = base_ref
     end
 
+    def validate_ref!
+      verify_ref!
+    end
+
     def changed_paths
       verify_ref!
       stdout, stderr, status = Open3.capture3(

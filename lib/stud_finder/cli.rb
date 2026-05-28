@@ -71,6 +71,7 @@ module StudFinder
       path = @argv.shift || '.'
       raise ValidationError, "Error: unexpected arguments: #{@argv.join(' ')}" unless @argv.empty?
 
+      @repo_path = File.expand_path(path)
       validate_options!
 
       result = FileCollector.new(
@@ -81,10 +82,11 @@ module StudFinder
       ).collect
       progress("collecting files... #{result.files.length} found")
 
-      @options[:filter_set] = resolve_filter_set(File.expand_path(path))
+      @options[:filter_set] = resolve_filter_set(@repo_path)
 
-      analysis = analyze(File.expand_path(path), result.files, result.languages)
-      emit_results(File.expand_path(path), result, analysis)
+      analysis = analyze(@repo_path, result.files, result.languages)
+      analysis = warn_if_no_scored_files(analysis)
+      emit_results(@repo_path, result, analysis)
       0
     rescue OptionParser::InvalidOption, OptionParser::MissingArgument, OptionParser::InvalidArgument, ValidationError,
            FileCollector::Error, Churn::Error, Complexity::Error, Coverage::Cobertura::Error, Coverage::Detector::Error,
@@ -218,9 +220,14 @@ module StudFinder
     end
 
     def validate_filter_options!
-      return unless @options[:diff_base] && @options[:only_paths]
+      if @options[:diff_base] && @options[:only_paths]
+        raise ValidationError, 'Error: --diff-base and --only are mutually exclusive.'
+      end
+      return unless @options[:diff_base] && @repo_path
 
-      raise ValidationError, 'Error: --diff-base and --only are mutually exclusive.'
+      Diff.new(repo_path: @repo_path, base_ref: @options[:diff_base]).validate_ref!
+    rescue Diff::Error => e
+      raise ValidationError, e.message
     end
 
     def validate_threshold!(name)
@@ -363,7 +370,25 @@ module StudFinder
         else
           @options[:only_paths]
         end
-      paths && Set.new(paths)
+      return nil unless paths
+
+      if paths.empty?
+        @stderr.puts 'Note: diff contains no changed files. Nothing to filter.'
+        @options[:cli_warnings] << 'diff_filter_empty'
+      end
+      Set.new(paths)
+    end
+
+    def warn_if_no_scored_files(analysis)
+      return analysis unless @options[:filter_set] && !@options[:filter_set].empty?
+
+      scored = Set.new(analysis.ruby.files + analysis.javascript.files)
+      return analysis if @options[:filter_set].intersect?(scored)
+
+      @stderr.puts 'Note: no scored files matched the diff. ' \
+                   'The PR may only touch unscorable files (docs, config, migrations, etc.).'
+      Report.new(ruby: analysis.ruby, javascript: analysis.javascript,
+                 warnings: (analysis.warnings + ['diff_no_scored_files']).uniq)
     end
 
     def limited_rows(rows)
@@ -432,6 +457,7 @@ module StudFinder
       }
       meta[:filtered] = true if @options[:filter_set]
       meta[:diff_base] = @options[:diff_base] if @options[:diff_base]
+      meta[:only_paths] = @options[:only_paths] if @options[:only_paths]
       meta
     end
 

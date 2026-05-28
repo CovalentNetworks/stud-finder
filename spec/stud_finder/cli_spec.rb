@@ -15,11 +15,15 @@ RSpec.describe StudFinder::CLI do
   def make_repo(file_count: 5)
     Dir.mktmpdir do |dir|
       system('git', 'init', '-q', dir)
+      system('git', '-C', dir, 'config', 'user.email', 'stud-finder@example.test')
+      system('git', '-C', dir, 'config', 'user.name', 'Stud Finder')
       file_count.times do |i|
         path = File.join(dir, "app/models/model_#{i}.rb")
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, "class Model#{i}\nend\n")
       end
+      system('git', '-C', dir, 'add', '.')
+      system('git', '-C', dir, 'commit', '-qm', 'initial')
       yield dir
     end
   end
@@ -352,6 +356,28 @@ RSpec.describe StudFinder::CLI do
 
       expect(status).to eq(1)
       expect(stderr).to include('diff base ref not found')
+    end
+  end
+
+  it 'errors on unknown --diff-base before running the full analysis' do
+    make_repo(file_count: 5) do |root|
+      status, _stdout, stderr = run_cli([root, '--min-files', '5', '--diff-base', 'origin/missing-branch'])
+
+      expect(status).to eq(1)
+      expect(stderr).to include('diff base ref not found')
+      expect(stderr).not_to include('computing Ruby')
+    end
+  end
+
+  it 'emits diff_filter_empty warning when the diff is empty' do
+    make_repo(file_count: 5) do |root|
+      system('git', '-C', root, 'branch', 'base')
+      status, stdout, stderr = run_cli([root, '--min-files', '5', '--output', 'json', '--diff-base', 'base'])
+      payload = JSON.parse(stdout)
+
+      expect(status).to eq(0)
+      expect(stderr).to include('diff contains no changed files')
+      expect(payload['warnings']).to include('diff_filter_empty')
     end
   end
 
