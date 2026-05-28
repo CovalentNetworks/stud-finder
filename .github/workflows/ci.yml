@@ -31,3 +31,14 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
       - run: bundle exec rubocop
+
+  gem-build:
+    name: Gem build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - run: gem build stud-finder.gemspec
