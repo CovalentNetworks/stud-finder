@@ -277,7 +277,7 @@ RSpec.describe StudFinder::CLI do
       expect(status).to eq(0)
       expect(JSON.parse(stdout).fetch('ruby').length).to eq(4)
       expect(stderr).to include("stud-finder → collecting files... 5 found\n")
-      expect(stderr).to include("stud-finder → computing Ruby fan_in (rubocop-ast)...\n")
+      expect(stderr).to include("stud-finder → computing Ruby fan_in + fan_out (rubocop-ast)...\n")
       expect(stderr).to include("stud-finder → computing Ruby complexity (rubocop)...\n")
       expect(stderr).to include("stud-finder → computing Ruby churn (git log, 12 days)...\n")
       expect(stderr).to include("stud-finder → normalizing + scoring 4 files...\n")
@@ -321,7 +321,7 @@ RSpec.describe StudFinder::CLI do
         StudFinder::CLI::RESULT_COLUMNS
       )
       expect(rows.last).to eq(
-        ['1', 'ruby', file, '0.5882', 'leaf', '0', '0.0000', '7', '1.0000', '3', '15', '1.0000', '']
+        ['1', 'ruby', file, '0.5882', 'leaf', '0', '0.0000', '0', '0.0000', '7', '1.0000', '3', '15', '1.0000', '']
       )
       expect(lines.last).to end_with(",\"\"\n")
     end
