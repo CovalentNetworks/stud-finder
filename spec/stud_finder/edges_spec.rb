@@ -19,8 +19,8 @@ RSpec.describe StudFinder::Edges do
 
   let(:edges) do
     {
-      'app/models/user.rb'    => { dependents: ['app/services/greet.rb'], dependencies: ['app/models/role.rb'] },
-      'app/models/role.rb'    => { dependents: ['app/models/user.rb', 'app/services/greet.rb'], dependencies: [] },
+      'app/models/user.rb' => { dependents: ['app/services/greet.rb'], dependencies: ['app/models/role.rb'] },
+      'app/models/role.rb' => { dependents: ['app/models/user.rb', 'app/services/greet.rb'], dependencies: [] },
       'app/services/greet.rb' => { dependents: [], dependencies: ['app/models/user.rb', 'app/models/role.rb'] }
     }
   end

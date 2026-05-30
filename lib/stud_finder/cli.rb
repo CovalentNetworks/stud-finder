@@ -444,8 +444,8 @@ module StudFinder
 
     def emit_table_section(title, rows)
       @stdout.puts title
-      @stdout.puts ' rank  language    file                                            score  class   fan_in  fan_out  ' \
-                   'instability  complexity  churn_commits  churn_lines  churn_pct  coverage'
+      @stdout.puts ' rank  language    file                                            score  class   fan_in  ' \
+                   'fan_out  instability  complexity  churn_commits  churn_lines  churn_pct  coverage'
       rows.each { |row| @stdout.puts table_row(row) }
       @stdout.puts
     end
