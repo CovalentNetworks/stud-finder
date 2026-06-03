@@ -4,16 +4,16 @@ module StudFinder
   class Edges
     MAX_ROWS = 50
 
+    CouplingConfig = Struct.new(:data, :churn_days, :min_commits, :threshold, keyword_init: true)
+
     def initialize(target:, rows:, edges:, coupling: {}, churn_days: 180,
                    coupling_min_commits: 5, coupling_threshold: 0.30,
                    stdout: $stdout, stderr: $stderr)
       @target = target
       @rows = rows.to_h { |row| [row[:path], row] }
       @edges = edges
-      @coupling = coupling
-      @churn_days = churn_days
-      @coupling_min_commits = coupling_min_commits
-      @coupling_threshold = coupling_threshold
+      @coupling = CouplingConfig.new(data: coupling, churn_days: churn_days,
+                                     min_commits: coupling_min_commits, threshold: coupling_threshold)
       @stdout = stdout
       @stderr = stderr
     end
@@ -38,7 +38,7 @@ module StudFinder
       emit_coupling_section
       @stdout.puts
       @stdout.puts 'Edges are statically computed — dynamic references not counted.'
-      @stdout.puts "Temporal coupling from git history (#{@churn_days}-day window)."
+      @stdout.puts "Temporal coupling from git history (#{@coupling.churn_days}-day window)."
       0
     end
 
@@ -85,19 +85,17 @@ module StudFinder
     end
 
     def emit_coupling_section
-      header = format(
+      @stdout.puts format(
         '  ── Temporal Coupling (%<days>d-day window, min %<min>d co-changes, threshold %<threshold>.2f) ──',
-        days: @churn_days, min: @coupling_min_commits, threshold: @coupling_threshold
+        days: @coupling.churn_days, min: @coupling.min_commits, threshold: @coupling.threshold
       )
-      @stdout.puts header
       @stdout.puts
 
-      partners = @coupling[@target] || []
+      partners = @coupling.data[@target] || []
       if partners.empty?
         @stdout.puts '    (none above threshold)'
       else
-        @stdout.puts format('  %<coupling>8s  %<co_changes>10s  %<path>s',
-                            coupling: 'coupling', co_changes: 'co_changes', path: 'file')
+        @stdout.puts '   coupling  co_changes  file'
         partners.each do |entry|
           @stdout.puts format('  %<coupling>8s  %<co_changes>10d  %<path>s',
                               coupling: format_score(entry[:coupling]),
