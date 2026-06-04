@@ -36,6 +36,7 @@ module StudFinder
         "--since=#{@days} days ago",
         '--diff-filter=ACDMR',
         '--name-only',
+        '--relative',
         '--format=%H'
       )
     end

@@ -443,6 +443,28 @@ RSpec.describe StudFinder::CLI do
       end
     end
 
+    it 'keeps temporal coupling partners when analyzing a subdirectory' do
+      make_repo(file_count: 5) do |root|
+        2.times do |i|
+          File.open(File.join(root, 'app/models/model_0.rb'), 'a') { |file| file.puts "# model 0 change #{i}" }
+          File.open(File.join(root, 'app/models/model_1.rb'), 'a') { |file| file.puts "# model 1 change #{i}" }
+          system('git', '-C', root, 'add', '.')
+          system('git', '-C', root, 'commit', '-qm', "couple models #{i}")
+        end
+
+        status, stdout, stderr = run_cli([
+                                           'edges', 'models/model_0.rb', File.join(root, 'app'),
+                                           '--min-files', '5', '--coupling-min-commits', '2',
+                                           '--coupling-threshold', '0.0'
+                                         ])
+
+        expect(status).to eq(0), stderr
+        expect(stdout).to include('stud-finder edges — models/model_0.rb')
+        expect(stdout).to include('models/model_1.rb')
+        expect(stdout).not_to include('(none above threshold)')
+      end
+    end
+
     it 'rejects a non-positive --coupling-min-commits' do
       make_repo(file_count: 5) do |root|
         status, _stdout, stderr = run_cli(['edges', 'app/models/model_0.rb', root, '--coupling-min-commits', '0'])
