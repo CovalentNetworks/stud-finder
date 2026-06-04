@@ -132,4 +132,16 @@ RSpec.describe StudFinder::TemporalCoupling do
     expect(result.pairs['app/models/user.rb'].map { |p| p[:path] }).to include('app/models/role.rb')
     expect(result.pairs['app/models/role.rb'].map { |p| p[:path] }).to include('app/models/user.rb')
   end
+
+  it 'does not double-count a file listed twice in a single commit' do
+    output = git_log_output(
+      ['app/models/user.rb', 'app/models/user.rb', 'app/models/role.rb'], # user.rb duplicated
+      ['app/models/user.rb', 'app/models/role.rb']
+    )
+    result = make_coupling(output, min_co_changes: 1, coupling_threshold: 0.0)
+    partner = result.pairs['app/models/user.rb'].find { |p| p[:path] == 'app/models/role.rb' }
+
+    expect(partner[:co_changes]).to eq(2) # two commits, not inflated to 3 by the dup
+    expect(result.pairs['app/models/user.rb'].map { |p| p[:path] }).not_to include('app/models/user.rb')
+  end
 end

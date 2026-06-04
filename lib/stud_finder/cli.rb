@@ -70,9 +70,20 @@ module StudFinder
     end
 
     def run
-      return run_edges(@argv[1], @argv[2] || '.') if @argv[0] == 'edges'
-
       parser = option_parser
+
+      if @argv[0] == 'edges'
+        @argv.shift
+        parser.parse!(@argv)
+        target = @argv.shift
+        path = @argv.shift || '.'
+        raise ValidationError, "Error: unexpected arguments: #{@argv.join(' ')}" unless @argv.empty?
+
+        @repo_path = File.expand_path(path)
+        validate_options!
+        return run_edges(target, path)
+      end
+
       parser.parse!(@argv)
       path = @argv.shift || '.'
       raise ValidationError, "Error: unexpected arguments: #{@argv.join(' ')}" unless @argv.empty?
@@ -249,6 +260,11 @@ module StudFinder
       raise ValidationError, 'Error: --top must be positive.' if @options[:top] && @options[:top] <= 0
       raise ValidationError, 'Error: --churn-days must be positive.' if @options[:churn_days] <= 0
       raise ValidationError, 'Error: --js-timeout must be positive.' if @options[:js_timeout] <= 0
+
+      raise ValidationError, 'Error: --coupling-min-commits must be positive.' if @options[:coupling_min_commits] <= 0
+      unless (0.0..1.0).cover?(@options[:coupling_threshold])
+        raise ValidationError, 'Error: --coupling-threshold must be between 0.0 and 1.0.'
+      end
 
       validate_coverage_paths!
       validate_filter_options!

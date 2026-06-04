@@ -50,7 +50,9 @@ module StudFinder
           current = []
         elsif !line.empty? && current
           relative = normalize_path(line)
-          current << relative if @file_set[relative]
+          # Guard against the same path appearing twice in one commit's --name-only
+          # output: a dup would inflate own_changes and create a spurious self-pair.
+          current << relative if @file_set[relative] && !current.include?(relative)
         end
       end
       commits << current if current&.any?
