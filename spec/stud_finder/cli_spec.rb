@@ -381,6 +381,25 @@ RSpec.describe StudFinder::CLI do
     end
   end
 
+  # Regression: row paths are relative to the analysis root, but diff paths are
+  # repo-root-relative. When PATH is a subdirectory they must be rebased to match,
+  # else every changed file is silently dropped.
+  it 'matches changed files when analyzing a subdirectory with --diff-base' do
+    make_repo(file_count: 5) do |root|
+      system('git', '-C', root, 'branch', 'base')
+      File.write(File.join(root, 'app/models/model_0.rb'), "class Model0\n  def x = 1\nend\n")
+      system('git', '-C', root, 'commit', '-qam', 'change model_0')
+
+      status, stdout, stderr = run_cli([File.join(root, 'app'), '--min-files', '5',
+                                        '--diff-base', 'base', '--output', 'json'])
+
+      expect(status).to eq(0), stderr
+      paths = JSON.parse(stdout)['ruby'].map { |row| row['path'] }
+      expect(paths).to eq(['models/model_0.rb'])
+      expect(stderr).not_to include('no scored files matched')
+    end
+  end
+
   it 'accepts positive coverage weight when --coverage is provided' do
     make_repo(file_count: 5) do |root|
       coverage_path = File.join(root, 'coverage.xml')

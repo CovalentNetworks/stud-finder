@@ -2,7 +2,9 @@
 
 require 'csv'
 require 'json'
+require 'open3'
 require 'optparse'
+require 'pathname'
 require 'set'
 require 'time'
 require_relative 'churn'
@@ -394,11 +396,44 @@ module StudFinder
         end
       return nil unless paths
 
+      # Diff (and documented --only) paths are repo-root-relative, but row paths are
+      # relative to the analysis root (FileCollector). Rebase so they compare equal
+      # when PATH is a subdirectory; a no-op when PATH is the repo root.
+      paths = rebase_to_analysis_root(paths, path)
+
       if paths.empty?
         @stderr.puts 'Note: diff contains no changed files. Nothing to filter.'
         @options[:cli_warnings] << 'diff_filter_empty'
       end
       Set.new(paths)
+    end
+
+    # Strips the analysis-root prefix from repo-root-relative filter paths and drops
+    # any path outside the analysis root. Returns paths unchanged when the analysis
+    # root is the repo root (or the toplevel can't be resolved).
+    def rebase_to_analysis_root(paths, analysis_path)
+      toplevel = git_toplevel(analysis_path)
+      return paths if toplevel.nil?
+
+      # realpath on both sides so symlinked roots (e.g. macOS /var -> /private/var)
+      # don't defeat the prefix comparison.
+      analysis_abs = File.realpath(analysis_path)
+      return paths if analysis_abs == toplevel
+
+      prefix = Pathname.new(analysis_abs).relative_path_from(Pathname.new(toplevel)).to_s
+      return paths if prefix.empty? || prefix == '.' || prefix.start_with?('..')
+
+      prefix += '/'
+      paths.select { |p| p.start_with?(prefix) }.map { |p| p.delete_prefix(prefix) }
+    rescue Errno::ENOENT
+      paths
+    end
+
+    def git_toplevel(analysis_path)
+      stdout, _stderr, status = Open3.capture3(
+        'git', '-C', File.expand_path(analysis_path), 'rev-parse', '--show-toplevel'
+      )
+      status.success? ? File.realpath(stdout.strip) : nil
     end
 
     def warn_if_no_scored_files(analysis)
